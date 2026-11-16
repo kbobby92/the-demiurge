@@ -86,9 +86,11 @@
       <div class="row"><span>Runs per task</span><input id="runs" type="number" min="1" max="5" value="1" style="width:60px"></div>
       <div class="row"><span>Temperature</span><input id="temp" type="number" min="0" max="1.5" step="0.1" value="0.8" style="width:70px"></div>
       <div class="row"><span>Max new tokens</span><input id="maxTok" type="number" min="64" max="1024" step="32" value="320" style="width:80px"></div>
+      <div class="row"><span>Time limit per answer (s)</span><input id="timeLimit" type="number" min="10" max="600" step="10" value="120" style="width:70px"></div>
       <label><input id="useSchema" type="checkbox" checked> <span>Force valid JSON (structured output, if the library loads)<br><small class="sub">Turn off to see how often a model gets the format right on its own.</small></span></label>
       <div class="row">
         <button id="runBtn">Run bake-off</button>
+        <button id="quickBtn" class="secondary" title="Two answers per model, to check everything works">Quick check</button>
         <button id="stopBtn" class="secondary" disabled>Stop after current task</button>
       </div>
       <div class="bar"><div id="progress"></div></div>
@@ -104,6 +106,7 @@
       <div class="row" style="margin-top:10px">
         <button class="secondary" id="copyBtn">Copy results (Markdown)</button>
         <button class="secondary" id="copyJsonBtn">Copy raw outputs (JSON)</button>
+        <button class="secondary" id="copyLogBtn">Copy status log</button>
         <span id="copyMsg" class="sub"></span>
       </div>
       <details style="margin-top:10px">
@@ -156,6 +159,8 @@ function log(msg) {
   logEl.textContent += `\n[${t}] ${msg}`;
   logEl.scrollTop = logEl.scrollHeight;
 }
+window.addEventListener("error", (e) => log("Page error: " + (e.message || e)));
+window.addEventListener("unhandledrejection", (e) => log("Unhandled error: " + (e.reason?.message || e.reason)));
 function setProgress(p) { $("progress").style.width = `${Math.max(0, Math.min(100, p))}%`; }
 
 // ---------------------------------------------------------------------------
@@ -501,12 +506,48 @@ async function generate(handle, task) {
     temperature: temp > 0 ? temp : undefined,
     top_p: 0.95,
   };
+  const tLp = performance.now();
   const lp = buildLogitsProcessors(handle, task.schema);
-  if (lp) genOpts.logits_processor = lp;
+  if (lp) {
+    genOpts.logits_processor = lp;
+    const ms = performance.now() - tLp;
+    if (ms > 500) log(`  (forced-JSON setup took ${(ms / 1000).toFixed(1)} s)`);
+  }
   const userText = task.prompt();
   const t0 = performance.now();
   let text, outTokens = 0;
 
+  // Live progress: count tokens as they arrive and report every few seconds.
+  let live = 0, lastReport = performance.now(), firstTokenAt = null;
+  genOpts.streamer = new T.TextStreamer(handle.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: () => {},
+    token_callback_function: () => {
+      live++;
+      const now = performance.now();
+      if (firstTokenAt === null) {
+        firstTokenAt = now;
+        log(`  first token after ${((now - t0) / 1000).toFixed(1)} s (prompt reading)`);
+      }
+      if (now - lastReport > 3000) {
+        lastReport = now;
+        log(`  …generating: ${live} tokens, ${(live / ((now - firstTokenAt) / 1000 || 1)).toFixed(1)} tok/s`);
+      }
+    },
+  });
+
+  // Time limit per answer so one stuck answer can't freeze the whole test.
+  const limitSec = parseInt($("timeLimit").value, 10) || 120;
+  const stopper = new T.InterruptableStoppingCriteria();
+  currentStopper = stopper;
+  genOpts.stopping_criteria = [stopper];
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; stopper.interrupt(); log(`  time limit of ${limitSec} s reached; stopping this answer.`); }, limitSec * 1000);
+  // If not even one token arrives, the GPU may be stuck; report it.
+  const watchdog = setTimeout(() => { if (firstTokenAt === null) log(`  still no output after 30 s… (if this never changes, copy this log and send it)`); }, 30000);
+
+  try {
   if (handle.kind === "pipeline") {
     const messages = [{ role: "system", content: SYSTEM }, { role: "user", content: userText }];
     const out = await handle.gen(messages, { ...genOpts, return_full_text: false });
@@ -532,8 +573,13 @@ async function generate(handle, task) {
     outTokens = newTokens.dims.at(-1);
     text = handle.processor.batch_decode(newTokens, { skip_special_tokens: true })[0];
   }
+  } finally {
+    clearTimeout(timer); clearTimeout(watchdog);
+  }
   const sec = (performance.now() - t0) / 1000;
-  return { text, sec, outTokens };
+  const firstTokenSec = firstTokenAt === null ? null : (firstTokenAt - t0) / 1000;
+  log(`  done: ${outTokens} tokens in ${sec.toFixed(1)} s${timedOut ? " (timed out)" : ""}`);
+  return { text, sec, outTokens, timedOut, firstTokenSec };
 }
 
 // ---------------------------------------------------------------------------
@@ -541,20 +587,24 @@ async function generate(handle, task) {
 // ---------------------------------------------------------------------------
 const RESULTS = {};   // modelName -> { load, tasks: [{taskId, run, text, json, valid, rulesOk, sec, toks, rating}] , error }
 let stopRequested = false;
+let currentStopper = null;
 let activeTab = null;
 
-$("stopBtn").addEventListener("click", () => { stopRequested = true; log("Stop requested; finishing the current task."); });
+$("stopBtn").addEventListener("click", () => { stopRequested = true; currentStopper?.interrupt(); log("Stop requested; ending the current answer now."); });
 
-$("runBtn").addEventListener("click", async () => {
+$("runBtn").addEventListener("click", () => runBakeoff(TASKS));
+$("quickBtn").addEventListener("click", () => runBakeoff(TASKS.filter((t) => t.id === "thought_soldier" || t.id === "decide_sela")));
+
+async function runBakeoff(tasksToRun) {
   const selected = MODELS.filter((m) => m.checked);
   if (!selected.length) { log("Pick at least one model."); return; }
   if (!navigator.gpu) { log("WebGPU is not available in this browser. Use Chrome or Edge."); return; }
-  $("runBtn").disabled = true; $("stopBtn").disabled = false; stopRequested = false;
+  $("runBtn").disabled = true; $("quickBtn").disabled = true; $("stopBtn").disabled = false; stopRequested = false;
   logEl.textContent = "Starting…";
-  try { await loadLibraries(); } catch (e) { log("Could not load Transformers.js: " + e.message); $("runBtn").disabled = false; $("stopBtn").disabled = true; return; }
+  try { await loadLibraries(); } catch (e) { log("Could not load Transformers.js: " + e.message); $("runBtn").disabled = false; $("quickBtn").disabled = false; $("stopBtn").disabled = true; return; }
 
   const runs = Math.max(1, Math.min(5, parseInt($("runs").value, 10) || 1));
-  const totalSteps = selected.length * TASKS.length * runs;
+  const totalSteps = selected.length * tasksToRun.length * runs;
   let step = 0;
 
   for (const m of selected) {
@@ -571,22 +621,24 @@ $("runBtn").addEventListener("click", async () => {
     } catch (e) {
       RESULTS[m.name].error = "Load failed: " + (e.message || e);
       log(`${m.name} failed to load: ${e.message || e}`);
-      step += TASKS.length * runs; setProgress((step / totalSteps) * 100);
+      step += tasksToRun.length * runs; setProgress((step / totalSteps) * 100);
       renderSummary(); renderOutputs();
       continue;
     }
 
     // Warm-up so the first timed task isn't penalized by shader compilation.
-    try { await generate(handle, TASKS.at(-1)); } catch { /* ignore */ }
+    log(`${m.name}: warm-up answer (not scored)…`);
+    try { await generate(handle, TASKS.at(-1)); }
+    catch (e) { log(`  warm-up error: ${e.message || e}`); }
 
-    for (const task of TASKS) {
+    for (const task of tasksToRun) {
       for (let r = 0; r < runs; r++) {
         if (stopRequested) break;
         log(`${m.name}: ${task.label}${runs > 1 ? ` (run ${r + 1})` : ""}`);
         const entry = { taskId: task.id, group: task.group, label: task.label, run: r + 1, rating: 0 };
         try {
           const g = await generate(handle, task);
-          entry.text = g.text; entry.sec = g.sec; entry.toks = g.outTokens;
+          entry.text = g.text; entry.sec = g.sec; entry.toks = g.outTokens; entry.timedOut = g.timedOut; entry.firstTokenSec = g.firstTokenSec;
           entry.json = extractJson(g.text);
           entry.valid = !!entry.json;
           entry.rulesOk = entry.valid && task.check(entry.json);
@@ -603,9 +655,9 @@ $("runBtn").addEventListener("click", async () => {
     log(`${m.name} done and unloaded from the GPU.`);
   }
   log(stopRequested ? "Stopped." : "Bake-off finished. Now rate the answers to fill in the last column.");
-  $("runBtn").disabled = false; $("stopBtn").disabled = true;
+  $("runBtn").disabled = false; $("quickBtn").disabled = false; $("stopBtn").disabled = true;
   renderSummary();
-});
+}
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -696,7 +748,8 @@ function renderOutputs() {
         <b>${escapeHtml(e.label)}${e.run > 1 ? ` (run ${e.run})` : ""}</b>
         <span class="meta">${e.sec ? e.sec.toFixed(1) + " s" : ""}
           ${e.valid ? '<span class="pill ok">JSON</span>' : '<span class="pill no">not JSON</span>'}
-          ${e.rulesOk ? '<span class="pill ok">rules</span>' : '<span class="pill no">rules</span>'}</span>
+          ${e.rulesOk ? '<span class="pill ok">rules</span>' : '<span class="pill no">rules</span>'}
+          ${e.timedOut ? '<span class="pill meh">timed out</span>' : ''}</span>
       </div>
       <pre>${escapeHtml(body)}</pre>
       <div class="row"><span class="meta">In character and sensible?</span>
@@ -737,9 +790,10 @@ $("copyBtn").addEventListener("click", () => {
 });
 $("copyJsonBtn").addEventListener("click", () => {
   const out = {};
-  for (const [n, R] of Object.entries(RESULTS)) out[n] = { load: R.load, error: R.error, tasks: R.tasks.map(({ taskId, run, text, valid, rulesOk, sec, toks, rating }) => ({ taskId, run, text, valid, rulesOk, sec, toks, rating })) };
-  copyText(JSON.stringify({ gpu: $("gpuInfo").textContent, results: out }, null, 2));
+  for (const [n, R] of Object.entries(RESULTS)) out[n] = { load: R.load, error: R.error, tasks: R.tasks.map(({ taskId, run, text, valid, rulesOk, sec, toks, rating, timedOut, firstTokenSec }) => ({ taskId, run, text, valid, rulesOk, sec, toks, rating, timedOut, firstTokenSec })) };
+  copyText(JSON.stringify({ gpu: $("gpuInfo").textContent, results: out, log: logEl.textContent.split("\n") }, null, 2));
 });
+$("copyLogBtn").addEventListener("click", () => copyText(logEl.textContent));
 
 // ---------------------------------------------------------------------------
 // GPU info
