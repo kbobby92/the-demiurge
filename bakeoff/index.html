@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Demiurge – Local Model Bake-off</title>
+<style>
+  :root {
+    --bg: #12141a; --panel: #1b1e27; --panel2: #232735; --text: #e6e8ef; --muted: #9aa0b4;
+    --accent: #e0b354; --good: #5fbf7f; --bad: #e06464; --warn: #e0a454; --line: #2e3344;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 24px 12px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; color: var(--accent); }
+  .sub { color: var(--muted); }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 16px; padding: 16px 24px 40px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .stack > * + * { margin-top: 12px; }
+  label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .model-row { padding: 8px; border-radius: 8px; background: var(--panel2); }
+  .model-row small { color: var(--muted); display: block; }
+  button { background: var(--accent); color: #1a1400; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input[type=number], input[type=text], select, textarea { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .status { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #0d0f14; border-radius: 8px; padding: 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+  .bar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+  .ok { background: #1f3a29; color: var(--good); } .no { background: #3d2020; color: var(--bad); } .meh { background: #3d3020; color: var(--warn); }
+  .card { background: var(--panel2); border-radius: 8px; padding: 10px; margin-top: 8px; }
+  .card .meta { color: var(--muted); font-size: 12px; }
+  .card pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0; font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  .stars button { background: transparent; color: var(--muted); padding: 0 2px; font-size: 18px; }
+  .stars button.on { color: var(--accent); }
+  .warnbox { border: 1px solid var(--warn); background: #2b2416; border-radius: 8px; padding: 10px; }
+  details summary { cursor: pointer; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .tabs button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .tabs button.active { background: var(--accent); color: #1a1400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The Demiurge – Local Model Bake-off</h1>
+  <div class="sub">Runs the same "Valley of Oren" scenario (a drought and a grain tax) through each small model on your own GPU, then scores the answers. Nothing leaves your computer except the one-time model downloads from Hugging Face.</div>
+</header>
+
+<main>
+  <section class="stack">
+    <div class="panel stack">
+      <h2>1. Your hardware</h2>
+      <div id="gpuInfo" class="sub">Checking WebGPU…</div>
+    </div>
+
+    <div class="panel stack">
+      <h2>2. Models to test</h2>
+      <div id="modelList" class="stack"></div>
+      <details>
+        <summary>Add a custom model</summary>
+        <div class="stack" style="margin-top:8px">
+          <input id="cmName" type="text" placeholder="Display name">
+          <input id="cmId" type="text" placeholder="Hugging Face repo, e.g. onnx-community/...">
+          <select id="cmKind">
+            <option value="pipeline">Text-generation pipeline (text-only models)</option>
+            <option value="qwen35">Qwen3.5 (Qwen3_5ForConditionalGeneration)</option>
+            <option value="gemma4">Gemma 4 (Gemma4ForConditionalGeneration)</option>
+          </select>
+          <input id="cmDtype" type="text" placeholder='dtype, e.g. q4f16 or {"decoder_model_merged":"q4"}'>
+          <button class="secondary" id="cmAdd">Add model</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="panel stack">
+      <h2>3. Settings</h2>
+      <div class="row"><span>Runs per task</span><input id="runs" type="number" min="1" max="5" value="1" style="width:60px"></div>
+      <div class="row"><span>Temperature</span><input id="temp" type="number" min="0" max="1.5" step="0.1" value="0.8" style="width:70px"></div>
+      <div class="row"><span>Max new tokens</span><input id="maxTok" type="number" min="64" max="1024" step="32" value="320" style="width:80px"></div>
+      <label><input id="useSchema" type="checkbox" checked> <span>Force valid JSON (structured output, if the library loads)<br><small class="sub">Turn off to see how often a model gets the format right on its own.</small></span></label>
+      <div class="row">
+        <button id="runBtn">Run bake-off</button>
+        <button id="stopBtn" class="secondary" disabled>Stop after current task</button>
+      </div>
+      <div class="bar"><div id="progress"></div></div>
+      <div id="status" class="status">Idle.</div>
+    </div>
+  </section>
+
+  <section class="stack">
+    <div class="panel">
+      <h2>Results</h2>
+      <div id="summaryNote" class="sub">Run the bake-off to fill this table. Rate answers below to add your own quality score; it's the most important column.</div>
+      <div style="overflow-x:auto"><table id="summary"></table></div>
+      <div class="row" style="margin-top:10px">
+        <button class="secondary" id="copyBtn">Copy results (Markdown)</button>
+        <button class="secondary" id="copyJsonBtn">Copy raw outputs (JSON)</button>
+        <span id="copyMsg" class="sub"></span>
+      </div>
+      <details style="margin-top:10px">
+        <summary>What the columns mean</summary>
+        <ul class="sub">
+          <li><b>Load</b>: seconds to download (first time) or load from cache, and compile on the GPU.</li>
+          <li><b>Sec/thought</b>: average time per character answer. Lower means characters can think more often.</li>
+          <li><b>Tok/s</b>: approximate output speed.</li>
+          <li><b>Valid JSON</b>: answers the game could read.</li>
+          <li><b>Rules OK</b>: answers that picked an allowed action and filled every field.</li>
+          <li><b>Distinct</b>: how different the five characters sound from each other (100 = no shared wording). Low scores mean persona collapse.</li>
+          <li><b>Your rating</b>: average of the stars you give. Judge: does this sound like this character, and is the decision sensible?</li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h2>Answers</h2>
+      <div class="tabs" id="tabs"></div>
+      <div id="outputs" class="sub">Answers appear here as each model runs.</div>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>The scenario (what every model is told)</summary>
+        <pre id="scenarioText" class="status" style="max-height:none"></pre>
+      </details>
+    </div>
+  </section>
+</main>
+
+<!-- Both libraries must share one copy of Transformers.js, so the bare name is mapped to one URL. -->
+<script type="importmap">
+{ "imports": { "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js" } }
+</script>
+<script type="module">
+// ---------------------------------------------------------------------------
+// Library loading
+// ---------------------------------------------------------------------------
+const TJS_URL = "@huggingface/transformers";
+const SO_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers-structured-output@4.3.2/dist/index.js";
+
+let T = null;          // transformers.js module
+let SO = null;         // structured-output module (optional)
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("status");
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent += `\n[${t}] ${msg}`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setProgress(p) { $("progress").style.width = `${Math.max(0, Math.min(100, p))}%`; }
+
+// ---------------------------------------------------------------------------
+// Candidate models
+// ---------------------------------------------------------------------------
+const QWEN_DTYPE = { embed_tokens: "q4", vision_encoder: "fp16", decoder_model_merged: "q4" };
+const MODELS = [
+  { name: "Qwen3.5 0.8B", id: "onnx-community/Qwen3.5-0.8B-ONNX-OPT", kind: "qwen35", dtype: QWEN_DTYPE, tier: "Low", checked: true },
+  { name: "Gemma 4 E2B", id: "onnx-community/gemma-4-E2B-it-ONNX", kind: "gemma4", dtype: "q4f16", tier: "Low / Default", checked: true },
+  { name: "Qwen3.5 2B", id: "onnx-community/Qwen3.5-2B-ONNX-OPT", kind: "qwen35", dtype: QWEN_DTYPE, tier: "Default", checked: true },
+  { name: "Gemma 4 E4B", id: "onnx-community/gemma-4-E4B-it-ONNX", kind: "gemma4", dtype: "q4f16", tier: "Default / Strong", checked: true },
+  { name: "Qwen3.5 4B", id: "onnx-community/Qwen3.5-4B-ONNX-OPT", kind: "qwen35", dtype: QWEN_DTYPE, tier: "Strong", checked: true },
+];
+
+function renderModelList() {
+  const el = $("modelList");
+  el.innerHTML = "";
+  MODELS.forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "model-row";
+    row.innerHTML = `<label><input type="checkbox" data-i="${i}" ${m.checked ? "checked" : ""}>
+      <span><b>${m.name}</b> <span class="pill meh">${m.tier}</span><small>${m.id}</small></span></label>`;
+    row.querySelector("input").addEventListener("change", (e) => { MODELS[i].checked = e.target.checked; });
+    el.appendChild(row);
+  });
+}
+renderModelList();
+
+$("cmAdd").addEventListener("click", () => {
+  const id = $("cmId").value.trim();
+  if (!id) return;
+  let dtype = $("cmDtype").value.trim() || "q4f16";
+  try { if (dtype.startsWith("{")) dtype = JSON.parse(dtype); } catch { /* keep string */ }
+  MODELS.push({ name: $("cmName").value.trim() || id, id, kind: $("cmKind").value, dtype, tier: "Custom", checked: true });
+  renderModelList();
+});
+
+// ---------------------------------------------------------------------------
+// The scenario: Valley of Oren, year 214
+// ---------------------------------------------------------------------------
+const WORLD = `WORLD: The Valley of Oren, year 214. A river valley of about 900 people in four villages, ruled from the hill-fort of Kessa.
+This world is NOT Earth. There are two moons, Ilu (pale, fast) and Varo (red, slow). The valley grows marrowgrain and keeps woolly hessbeasts.
+Copper-like "greenstone" is smelted in the hills. A neighboring kingdom, Varn, lies across the eastern ridge.
+
+CURRENT SITUATION (facts everyone in the valley knows):
+- It is the third year of drought. The river is at its lowest in living memory. The marrowgrain harvest is about half of normal.
+- Last month King Oren raised the grain tax from one sack in ten to one sack in five, to feed his army of 120 spearmen.
+- In the village of Low Ford, eleven people have died of a wasting fever this season. Low Ford draws water from the shrinking river.
+- The red moon Varo has been unusually bright for two years.
+- Merchants say Varn's harvest was normal, and Varn has built a stone dam on the upper river.
+- Last week a tax collector was beaten in Low Ford. The king hanged two men for it.`;
+
+const CHARACTERS = {
+  oren: {
+    name: "King Oren", role: "ruler",
+    traits: "proud, paranoid, competent soldier, distrusts priests, hates appearing weak",
+    goals: "keep the throne; keep the army loyal; never bow to Varn",
+    private: "You know the granary in Kessa holds only enough to feed the army for four months. You suspect the High Priest wants your crown.",
+    memories: "Your father lost a war to Varn. You swore on his grave Varn would never humble you. Two years ago you ignored the priests' warning to hold a rain ritual.",
+    actions: ["raise_taxes", "lower_taxes", "open_granary", "crack_down", "send_envoy_to_varn", "prepare_war", "hold_public_ritual", "arrest_rival"],
+  },
+  sela: {
+    name: "Sela of Low Ford", role: "farmer",
+    traits: "stubborn, compassionate, quick-tempered, respected by her neighbors, illiterate but clever",
+    goals: "keep her family alive; get justice for her brother",
+    private: "One of the two men the king hanged was your brother Tamo. He did not beat the tax collector; he only stood nearby.",
+    memories: "You lost half your harvest. Your youngest child has the fever. Your grandmother told stories of a time when villages chose their own elders.",
+    actions: ["pay_tax", "hide_grain", "flee_valley", "speak_out_publicly", "organize_neighbors_secretly", "petition_the_king", "pray_at_shrine", "do_nothing"],
+  },
+  maro: {
+    name: "High Priest Maro", role: "priest",
+    traits: "pious, ambitious, eloquent, patient, believes the moons speak the will of the gods",
+    goals: "make the temple the true power in the valley; end the drought through the gods' favor",
+    private: "You secretly believe the king's arrogance angered the gods. You have been quietly gathering donations of grain at the temple.",
+    memories: "Two years ago the king refused your rain ritual. The bright red moon appeared soon after.",
+    actions: ["preach_obedience", "preach_against_the_king", "hold_rain_ritual", "declare_omen", "distribute_temple_grain", "ally_with_general", "stay_silent"],
+  },
+  tavik: {
+    name: "General Tavik", role: "general",
+    traits: "loyal to the realm more than to the king, pragmatic, popular with soldiers, cautious",
+    goals: "keep the soldiers fed and loyal; avoid a war the valley cannot win",
+    private: "Your soldiers are grumbling; three deserted last week. You know Varn's army is twice the size of yours.",
+    memories: "You fought beside the king's father in the lost war. You remember how many died.",
+    actions: ["obey_the_king", "advise_peace", "advise_war", "feed_soldiers_first", "secretly_contact_priest", "secretly_contact_varn", "prepare_coup"],
+  },
+  ilsa: {
+    name: "Ilsa the Grain Merchant", role: "merchant",
+    traits: "greedy, shrewd, charming, cynical about gods and kings alike",
+    goals: "grow rich; keep trade routes to Varn open",
+    private: "You have three hidden storehouses of grain. Varn's merchants offered you a high price if you can deliver grain across the ridge.",
+    memories: "Your caravans have crossed the ridge for twenty years. The last war ruined your father's business.",
+    actions: ["sell_grain_at_high_price", "sell_grain_to_varn", "donate_grain", "bribe_officials", "fund_rebels", "fund_the_king", "hoard_and_wait"],
+  },
+};
+const CHAR_KEYS = Object.keys(CHARACTERS);
+
+function characterBlock(c) {
+  return `YOU ARE: ${c.name} (${c.role}).
+Personality: ${c.traits}.
+Goals: ${c.goals}.
+Secret knowledge (only you know this): ${c.private}
+Memories: ${c.memories}`;
+}
+
+const SYSTEM = `You are simulating one inhabitant of a fictional world for a strategy game. Stay fully in character: think only with this character's knowledge, personality and goals. The character may be wrong, biased or selfish. Never mention being an AI or a game. Reply ONLY with one JSON object, no extra text.`;
+
+// Each task: id, label, which characters, prompt builder, schema, validator
+function decisionSchema(c) {
+  return {
+    type: "object",
+    properties: {
+      action: { enum: c.actions },
+      reason: { type: "string" },
+      speech: { type: "string" },
+      mood: { enum: ["calm", "angry", "afraid", "hopeful", "grieving", "scheming", "determined"] },
+    },
+    required: ["action", "reason", "speech", "mood"],
+    additionalProperties: false,
+  };
+}
+const beliefSchema = {
+  type: "object",
+  properties: {
+    explanation: { type: "string" },
+    blame: { enum: ["the_gods", "the_king", "varn_dam", "the_moons", "bad_water", "witchcraft", "nature", "unknown"] },
+    confidence: { type: "number" },
+    evidence: { type: "string" },
+  },
+  required: ["explanation", "blame", "confidence", "evidence"],
+  additionalProperties: false,
+};
+const ideologySchema = {
+  type: "object",
+  properties: {
+    movement_name: { type: "string" },
+    core_ideas: { type: "array", items: { type: "string" } },
+    pitch_to_neighbors: { type: "string" },
+    first_step: { type: "string" },
+  },
+  required: ["movement_name", "core_ideas", "pitch_to_neighbors", "first_step"],
+  additionalProperties: false,
+};
+const diplomacySchema = {
+  type: "object",
+  properties: {
+    response: { enum: ["accept", "reject", "counter_offer", "stall"] },
+    terms: { type: "string" },
+    words_to_envoy: { type: "string" },
+    private_thought: { type: "string" },
+  },
+  required: ["response", "terms", "words_to_envoy", "private_thought"],
+  additionalProperties: false,
+};
+const thoughtSchema = {
+  type: "object",
+  properties: { thought: { type: "string" }, feeling: { type: "string" } },
+  required: ["thought", "feeling"],
+  additionalProperties: false,
+};
+
+const TASKS = [
+  ...CHAR_KEYS.map((k) => ({
+    id: `decide_${k}`, group: "Decisions", char: k, label: `${CHARACTERS[k].name}: what do you do?`,
+    schema: decisionSchema(CHARACTERS[k]),
+    prompt: () => `${WORLD}\n\n${characterBlock(CHARACTERS[k])}\n\nTASK: Decide what you do this month. Choose exactly one action from this list: ${CHARACTERS[k].actions.join(", ")}.
+Reply with JSON: {"action": one of the list, "reason": your private reasoning in 1-2 sentences, "speech": what you say out loud in 1-2 sentences, in your own voice, "mood": one of calm, angry, afraid, hopeful, grieving, scheming, determined}`,
+    check: (o) => typeof o.action === "string" && CHARACTERS[k].actions.includes(o.action) && nonEmpty(o.reason) && nonEmpty(o.speech),
+    distinctText: (o) => `${o.reason || ""} ${o.speech || ""}`,
+  })),
+  ...CHAR_KEYS.map((k) => ({
+    id: `belief_${k}`, group: "Beliefs", char: k, label: `${CHARACTERS[k].name}: why is there a drought?`,
+    schema: beliefSchema,
+    prompt: () => `${WORLD}\n\n${characterBlock(CHARACTERS[k])}\n\nTASK: In your own mind, why has the drought and the fever come? Answer as YOU believe, even if you are wrong.
+Reply with JSON: {"explanation": 1-2 sentences, "blame": one of the_gods, the_king, varn_dam, the_moons, bad_water, witchcraft, nature, unknown, "confidence": a number from 0 to 1, "evidence": what you have seen that supports this}`,
+    check: (o) => nonEmpty(o.explanation) && beliefSchema.properties.blame.enum.includes(o.blame) && typeof o.confidence === "number" && o.confidence >= 0 && o.confidence <= 1,
+    distinctText: (o) => `${o.explanation || ""} ${o.evidence || ""}`,
+  })),
+  {
+    id: "ideology_sela", group: "Ideas", char: "sela", label: "Sela invents a political idea",
+    schema: ideologySchema,
+    prompt: () => `${WORLD}\n\n${characterBlock(CHARACTERS.sela)}\n\nTASK: After your brother's hanging, you have been thinking for weeks. You begin to form an idea about how the valley should be ruled differently. Invent the idea in your own words; it does not need to resemble anything you have heard of.
+Reply with JSON: {"movement_name": a short name for the idea or movement, "core_ideas": 2-4 short statements, "pitch_to_neighbors": what you whisper to a trusted neighbor to win them over, "first_step": the first practical thing you will do}`,
+    check: (o) => nonEmpty(o.movement_name) && Array.isArray(o.core_ideas) && o.core_ideas.length >= 2 && nonEmpty(o.pitch_to_neighbors) && nonEmpty(o.first_step),
+  },
+  {
+    id: "diplomacy_oren", group: "Diplomacy", char: "oren", label: "Varn's envoy makes an offer to King Oren",
+    schema: diplomacySchema,
+    prompt: () => `${WORLD}\n\n${characterBlock(CHARACTERS.oren)}\n\nEVENT: An envoy from Varn arrives. Varn offers to open its dam for one season and sell you 300 sacks of marrowgrain. In return, Varn wants the greenstone mines in the hills for ten years, and wants you to kneel before their queen's banner in public.
+TASK: Respond as King Oren.
+Reply with JSON: {"response": one of accept, reject, counter_offer, stall, "terms": your terms in one sentence (or "none"), "words_to_envoy": what you say to the envoy, "private_thought": what you really think}`,
+    check: (o) => diplomacySchema.properties.response.enum.includes(o.response) && nonEmpty(o.words_to_envoy) && nonEmpty(o.private_thought),
+  },
+  {
+    id: "thought_child", group: "Citizen thoughts", char: null, label: "Ordinary citizen: a herder boy, age 12",
+    schema: thoughtSchema,
+    prompt: () => `${WORLD}\n\nYOU ARE: Pell, a 12-year-old hessbeast herder in the village of Reedmere. You are curious and a little afraid of the soldiers. Your family's hessbeasts are thin.\n\nTASK: The player is watching you. What are you thinking right now, in this moment?
+Reply with JSON: {"thought": your thought in 1-2 sentences, in your own voice, "feeling": one word}`,
+    check: (o) => nonEmpty(o.thought) && nonEmpty(o.feeling),
+  },
+  {
+    id: "thought_soldier", group: "Citizen thoughts", char: null, label: "Ordinary citizen: a spearman at the fort",
+    schema: thoughtSchema,
+    prompt: () => `${WORLD}\n\nYOU ARE: Doran, a spearman in King Oren's army, 30 years old. Your mother lives in Low Ford. Your rations were cut last week.\n\nTASK: The player is watching you. What are you thinking right now, in this moment?
+Reply with JSON: {"thought": your thought in 1-2 sentences, in your own voice, "feeling": one word}`,
+    check: (o) => nonEmpty(o.thought) && nonEmpty(o.feeling),
+  },
+];
+
+$("scenarioText").textContent = `${SYSTEM}\n\n${WORLD}\n\n--- CHARACTERS ---\n\n${CHAR_KEYS.map((k) => characterBlock(CHARACTERS[k]) + `\nAllowed actions: ${CHARACTERS[k].actions.join(", ")}`).join("\n\n")}\n\n--- TASKS ---\n${TASKS.map((t) => "- " + t.label).join("\n")}`;
+
+function nonEmpty(s) { return typeof s === "string" && s.trim().length > 3; }
+
+// ---------------------------------------------------------------------------
+// JSON extraction and similarity
+// ---------------------------------------------------------------------------
+function extractJson(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/```json|```/g, "");
+  try { return JSON.parse(cleaned.trim()); } catch { /* try to find an object */ }
+  const start = cleaned.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) { try { return JSON.parse(cleaned.slice(start, i + 1)); } catch { return null; } } }
+  }
+  return null;
+}
+
+const STOP = new Set("the a an and or of to in on for is are was were be been i my me we our you your it its this that with as at by from will not but they them their he she his her have has had so do does did just all can if then than into out up what who".split(" "));
+function words(s) { return new Set((s || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w))); }
+function jaccard(a, b) { if (!a.size && !b.size) return 1; let inter = 0; for (const w of a) if (b.has(w)) inter++; return inter / (a.size + b.size - inter); }
+function distinctness(texts) {
+  const sets = texts.filter(Boolean).map(words);
+  if (sets.length < 2) return null;
+  let sum = 0, n = 0;
+  for (let i = 0; i < sets.length; i++) for (let j = i + 1; j < sets.length; j++) { sum += jaccard(sets[i], sets[j]); n++; }
+  return Math.round((1 - sum / n) * 100);
+}
+
+// ---------------------------------------------------------------------------
+// Model loading and generation
+// ---------------------------------------------------------------------------
+async function loadLibraries() {
+  if (!T) {
+    log("Loading Transformers.js 4.3.2…");
+    T = await import(TJS_URL);
+    log("Transformers.js loaded.");
+  }
+  if ($("useSchema").checked && SO === null) {
+    try {
+      SO = await import(SO_URL);
+      log("Structured-output library loaded: answers will be forced into valid JSON.");
+    } catch (e) {
+      SO = false;
+      log("Structured-output library could not load; continuing without it (" + e.message + ").");
+    }
+  }
+}
+
+function progressCallback(name) {
+  const files = {};
+  let last = 0;
+  return (p) => {
+    if (p.status === "progress" && p.file) {
+      files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
+      const loaded = Object.values(files).reduce((a, f) => a + f.loaded, 0);
+      const total = Object.values(files).reduce((a, f) => a + f.total, 0);
+      const now = Date.now();
+      if (now - last > 1500) {
+        last = now;
+        log(`${name}: downloading ${(loaded / 1e9).toFixed(2)} / ${(total / 1e9).toFixed(2)} GB`);
+      }
+    }
+  };
+}
+
+// Repos name their quantized files differently, so each kind has fallbacks to try in order.
+function dtypeCandidates(m) {
+  const list = [m.dtype];
+  if (m.kind === "qwen35") list.push(
+    { embed_tokens: "q4f16", vision_encoder: "fp16", decoder_model_merged: "q4f16" },
+    "q4f16", "q4");
+  else list.push("q4f16", "q4");
+  const seen = new Set();
+  return list.filter((d) => { const k = JSON.stringify(d); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+async function loadModel(m) {
+  let lastErr;
+  for (const dtype of dtypeCandidates(m)) {
+    try {
+      const h = await loadModelWith(m, dtype);
+      if (JSON.stringify(dtype) !== JSON.stringify(m.dtype)) log(`${m.name}: loaded with dtype ${JSON.stringify(dtype)}.`);
+      return h;
+    } catch (e) {
+      lastErr = e;
+      log(`${m.name}: dtype ${JSON.stringify(dtype)} failed (${e.message || e}). Trying the next option…`);
+    }
+  }
+  throw lastErr;
+}
+
+async function loadModelWith(m, dtype) {
+  const t0 = performance.now();
+  const opts = { dtype, device: "webgpu", progress_callback: progressCallback(m.name) };
+  let handle;
+  if (m.kind === "pipeline") {
+    const gen = await T.pipeline("text-generation", m.id, opts);
+    handle = { kind: "pipeline", gen, tokenizer: gen.tokenizer, dispose: () => gen.dispose?.() };
+  } else {
+    const processor = await T.AutoProcessor.from_pretrained(m.id);
+    const Cls = m.kind === "gemma4" ? T.Gemma4ForConditionalGeneration : T.Qwen3_5ForConditionalGeneration;
+    if (!Cls) throw new Error(`This version of Transformers.js has no ${m.kind === "gemma4" ? "Gemma4" : "Qwen3_5"}ForConditionalGeneration class.`);
+    const model = await Cls.from_pretrained(m.id, opts);
+    handle = { kind: m.kind, processor, model, tokenizer: processor.tokenizer, dispose: () => model.dispose?.() };
+  }
+  handle.loadSec = (performance.now() - t0) / 1000;
+  if (SO && $("useSchema").checked) {
+    try { SO.StructuredOutputProcessor.warmup?.(handle.tokenizer); } catch { /* optional */ }
+  }
+  return handle;
+}
+
+function buildLogitsProcessors(handle, schema) {
+  if (!SO || !$("useSchema").checked) return undefined;
+  try {
+    return [new SO.StructuredOutputProcessor(handle.tokenizer, { type: "json_schema", json_schema: schema })];
+  } catch (e) {
+    log("Structured output failed for this model, running unconstrained: " + e.message);
+    return undefined;
+  }
+}
+
+async function generate(handle, task) {
+  const temp = parseFloat($("temp").value) || 0;
+  const genOpts = {
+    max_new_tokens: parseInt($("maxTok").value, 10) || 320,
+    do_sample: temp > 0,
+    temperature: temp > 0 ? temp : undefined,
+    top_p: 0.95,
+  };
+  const lp = buildLogitsProcessors(handle, task.schema);
+  if (lp) genOpts.logits_processor = lp;
+  const userText = task.prompt();
+  const t0 = performance.now();
+  let text, outTokens = 0;
+
+  if (handle.kind === "pipeline") {
+    const messages = [{ role: "system", content: SYSTEM }, { role: "user", content: userText }];
+    const out = await handle.gen(messages, { ...genOpts, return_full_text: false });
+    const last = out[0].generated_text;
+    text = Array.isArray(last) ? last.at(-1).content : last;
+    outTokens = handle.tokenizer.encode(text).length;
+  } else {
+    // Multimodal model classes used for text only. System text is folded into the user turn
+    // because some chat templates do not accept a system role.
+    const messages = [{ role: "user", content: [{ type: "text", text: `${SYSTEM}\n\n${userText}` }] }];
+    const prompt = handle.processor.apply_chat_template(messages, { add_generation_prompt: true, enable_thinking: false });
+    let inputs;
+    try {
+      inputs = handle.tokenizer(prompt, { add_special_tokens: false });
+    } catch {
+      inputs = handle.kind === "gemma4"
+        ? await handle.processor(prompt, null, null, { add_special_tokens: false })
+        : await handle.processor(prompt);
+    }
+    const outputs = await handle.model.generate({ ...inputs, ...genOpts });
+    const promptLen = inputs.input_ids.dims.at(-1);
+    const newTokens = outputs.slice(null, [promptLen, null]);
+    outTokens = newTokens.dims.at(-1);
+    text = handle.processor.batch_decode(newTokens, { skip_special_tokens: true })[0];
+  }
+  const sec = (performance.now() - t0) / 1000;
+  return { text, sec, outTokens };
+}
+
+// ---------------------------------------------------------------------------
+// Run loop
+// ---------------------------------------------------------------------------
+const RESULTS = {};   // modelName -> { load, tasks: [{taskId, run, text, json, valid, rulesOk, sec, toks, rating}] , error }
+let stopRequested = false;
+let activeTab = null;
+
+$("stopBtn").addEventListener("click", () => { stopRequested = true; log("Stop requested; finishing the current task."); });
+
+$("runBtn").addEventListener("click", async () => {
+  const selected = MODELS.filter((m) => m.checked);
+  if (!selected.length) { log("Pick at least one model."); return; }
+  if (!navigator.gpu) { log("WebGPU is not available in this browser. Use Chrome or Edge."); return; }
+  $("runBtn").disabled = true; $("stopBtn").disabled = false; stopRequested = false;
+  logEl.textContent = "Starting…";
+  try { await loadLibraries(); } catch (e) { log("Could not load Transformers.js: " + e.message); $("runBtn").disabled = false; $("stopBtn").disabled = true; return; }
+
+  const runs = Math.max(1, Math.min(5, parseInt($("runs").value, 10) || 1));
+  const totalSteps = selected.length * TASKS.length * runs;
+  let step = 0;
+
+  for (const m of selected) {
+    if (stopRequested) break;
+    RESULTS[m.name] = { model: m, load: null, tasks: [], error: null };
+    activeTab = m.name;
+    renderTabs(); renderOutputs(); renderSummary();
+    let handle;
+    try {
+      log(`Loading ${m.name} (${m.id})… the first time this downloads the model.`);
+      handle = await loadModel(m);
+      RESULTS[m.name].load = handle.loadSec;
+      log(`${m.name} ready in ${handle.loadSec.toFixed(1)} s.`);
+    } catch (e) {
+      RESULTS[m.name].error = "Load failed: " + (e.message || e);
+      log(`${m.name} failed to load: ${e.message || e}`);
+      step += TASKS.length * runs; setProgress((step / totalSteps) * 100);
+      renderSummary(); renderOutputs();
+      continue;
+    }
+
+    // Warm-up so the first timed task isn't penalized by shader compilation.
+    try { await generate(handle, TASKS.at(-1)); } catch { /* ignore */ }
+
+    for (const task of TASKS) {
+      for (let r = 0; r < runs; r++) {
+        if (stopRequested) break;
+        log(`${m.name}: ${task.label}${runs > 1 ? ` (run ${r + 1})` : ""}`);
+        const entry = { taskId: task.id, group: task.group, label: task.label, run: r + 1, rating: 0 };
+        try {
+          const g = await generate(handle, task);
+          entry.text = g.text; entry.sec = g.sec; entry.toks = g.outTokens;
+          entry.json = extractJson(g.text);
+          entry.valid = !!entry.json;
+          entry.rulesOk = entry.valid && task.check(entry.json);
+        } catch (e) {
+          entry.text = "ERROR: " + (e.message || e); entry.valid = false; entry.rulesOk = false; entry.sec = null;
+          log(`  error: ${e.message || e}`);
+        }
+        RESULTS[m.name].tasks.push(entry);
+        step++; setProgress((step / totalSteps) * 100);
+        renderOutputs(); renderSummary();
+      }
+    }
+    try { await handle.dispose(); } catch { /* ignore */ }
+    log(`${m.name} done and unloaded from the GPU.`);
+  }
+  log(stopRequested ? "Stopped." : "Bake-off finished. Now rate the answers to fill in the last column.");
+  $("runBtn").disabled = false; $("stopBtn").disabled = true;
+  renderSummary();
+});
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function summarize(name) {
+  const R = RESULTS[name];
+  const t = R.tasks;
+  const timed = t.filter((x) => typeof x.sec === "number");
+  const avgSec = timed.length ? timed.reduce((a, x) => a + x.sec, 0) / timed.length : null;
+  const tokps = timed.length ? timed.reduce((a, x) => a + (x.toks || 0), 0) / timed.reduce((a, x) => a + x.sec, 0) : null;
+  const valid = t.length ? t.filter((x) => x.valid).length / t.length : null;
+  const rules = t.length ? t.filter((x) => x.rulesOk).length / t.length : null;
+  // Distinctness: across the five characters, per run, for decisions and beliefs.
+  const dScores = [];
+  for (const group of ["decide_", "belief_"]) {
+    const runsSeen = [...new Set(t.map((x) => x.run))];
+    for (const run of runsSeen) {
+      const texts = CHAR_KEYS.map((k) => {
+        const e = t.find((x) => x.taskId === group + k && x.run === run && x.json);
+        const task = TASKS.find((tt) => tt.id === group + k);
+        return e ? task.distinctText(e.json) : null;
+      });
+      const d = distinctness(texts);
+      if (d !== null) dScores.push(d);
+    }
+  }
+  const distinct = dScores.length ? Math.round(dScores.reduce((a, b) => a + b, 0) / dScores.length) : null;
+  const rated = t.filter((x) => x.rating > 0);
+  const rating = rated.length ? rated.reduce((a, x) => a + x.rating, 0) / rated.length : null;
+  return { load: R.load, avgSec, tokps, valid, rules, distinct, rating, ratedCount: rated.length, n: t.length, error: R.error };
+}
+
+const pct = (v) => v === null ? "–" : `${Math.round(v * 100)}%`;
+function pill(v, good, ok) {
+  if (v === null || v === undefined) return "–";
+  const cls = v >= good ? "ok" : v >= ok ? "meh" : "no";
+  return `<span class="pill ${cls}">${typeof v === "number" && v <= 1 ? pct(v) : v}</span>`;
+}
+
+function renderSummary() {
+  const names = Object.keys(RESULTS);
+  const tbl = $("summary");
+  if (!names.length) { tbl.innerHTML = ""; return; }
+  $("summaryNote").textContent = "Green is good, amber is borderline, red is a problem. Your rating is the column that matters most.";
+  let html = `<tr><th>Model</th><th>Load (s)</th><th>Sec/thought</th><th>Tok/s</th><th>Valid JSON</th><th>Rules OK</th><th>Distinct</th><th>Your rating</th></tr>`;
+  for (const n of names) {
+    const s = summarize(n);
+    if (s.error) { html += `<tr><td><b>${n}</b></td><td colspan="7"><span class="pill no">${escapeHtml(s.error)}</span></td></tr>`; continue; }
+    html += `<tr><td><b>${n}</b><br><small class="sub">${s.n} answers</small></td>
+      <td>${s.load === null ? "…" : s.load.toFixed(1)}</td>
+      <td>${s.avgSec === null ? "–" : s.avgSec.toFixed(1)}</td>
+      <td>${s.tokps === null ? "–" : s.tokps.toFixed(0)}</td>
+      <td>${pill(s.valid, 0.95, 0.8)}</td>
+      <td>${pill(s.rules, 0.9, 0.7)}</td>
+      <td>${s.distinct === null ? "–" : pill(s.distinct, 75, 60)}</td>
+      <td>${s.rating === null ? `<span class="sub">rate below</span>` : `${s.rating.toFixed(1)} ★ <small class="sub">(${s.ratedCount})</small>`}</td></tr>`;
+  }
+  tbl.innerHTML = html;
+}
+
+function renderTabs() {
+  const el = $("tabs");
+  el.innerHTML = "";
+  for (const n of Object.keys(RESULTS)) {
+    const b = document.createElement("button");
+    b.textContent = n;
+    if (n === activeTab) b.className = "active";
+    b.addEventListener("click", () => { activeTab = n; renderTabs(); renderOutputs(); });
+    el.appendChild(b);
+  }
+}
+
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function renderOutputs() {
+  const el = $("outputs");
+  const R = RESULTS[activeTab];
+  if (!R) { el.textContent = "Answers appear here as each model runs."; return; }
+  el.className = "";
+  if (R.error) { el.innerHTML = `<div class="warnbox">${escapeHtml(R.error)}<br><small>Tip: check the model ID, or try a different dtype via "Add a custom model".</small></div>`; return; }
+  let html = "";
+  let lastGroup = null;
+  R.tasks.forEach((e, idx) => {
+    if (e.group !== lastGroup) { html += `<h3>${e.group}</h3>`; lastGroup = e.group; }
+    const body = e.json ? JSON.stringify(e.json, null, 2) : e.text;
+    html += `<div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b>${escapeHtml(e.label)}${e.run > 1 ? ` (run ${e.run})` : ""}</b>
+        <span class="meta">${e.sec ? e.sec.toFixed(1) + " s" : ""}
+          ${e.valid ? '<span class="pill ok">JSON</span>' : '<span class="pill no">not JSON</span>'}
+          ${e.rulesOk ? '<span class="pill ok">rules</span>' : '<span class="pill no">rules</span>'}</span>
+      </div>
+      <pre>${escapeHtml(body)}</pre>
+      <div class="row"><span class="meta">In character and sensible?</span>
+        <span class="stars" data-idx="${idx}">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}" class="${e.rating >= n ? "on" : ""}" title="${n}">★</button>`).join("")}</span></div>
+    </div>`;
+  });
+  el.innerHTML = html;
+  el.querySelectorAll(".stars").forEach((s) => {
+    s.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      const entry = RESULTS[activeTab].tasks[+s.dataset.idx];
+      const n = +b.dataset.n;
+      entry.rating = entry.rating === n ? 0 : n;
+      s.querySelectorAll("button").forEach((bb) => bb.classList.toggle("on", +bb.dataset.n <= entry.rating));
+      renderSummary();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Copy results
+// ---------------------------------------------------------------------------
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); $("copyMsg").textContent = "Copied."; }
+  catch { $("copyMsg").textContent = "Copy failed; select the text in the status box instead."; log(text); }
+  setTimeout(() => { $("copyMsg").textContent = ""; }, 3000);
+}
+$("copyBtn").addEventListener("click", () => {
+  const lines = ["| Model | Load (s) | Sec/thought | Tok/s | Valid JSON | Rules OK | Distinct | Your rating |", "|---|---|---|---|---|---|---|---|"];
+  for (const n of Object.keys(RESULTS)) {
+    const s = summarize(n);
+    if (s.error) { lines.push(`| ${n} | ${s.error} |||||||`); continue; }
+    lines.push(`| ${n} | ${s.load?.toFixed(1) ?? "–"} | ${s.avgSec?.toFixed(1) ?? "–"} | ${s.tokps?.toFixed(0) ?? "–"} | ${pct(s.valid)} | ${pct(s.rules)} | ${s.distinct ?? "–"} | ${s.rating ? s.rating.toFixed(1) : "–"} |`);
+  }
+  lines.push("", `GPU: ${$("gpuInfo").textContent}`, `Settings: runs=${$("runs").value}, temperature=${$("temp").value}, max tokens=${$("maxTok").value}, forced JSON=${$("useSchema").checked && !!SO}`);
+  copyText(lines.join("\n"));
+});
+$("copyJsonBtn").addEventListener("click", () => {
+  const out = {};
+  for (const [n, R] of Object.entries(RESULTS)) out[n] = { load: R.load, error: R.error, tasks: R.tasks.map(({ taskId, run, text, valid, rulesOk, sec, toks, rating }) => ({ taskId, run, text, valid, rulesOk, sec, toks, rating })) };
+  copyText(JSON.stringify({ gpu: $("gpuInfo").textContent, results: out }, null, 2));
+});
+
+// ---------------------------------------------------------------------------
+// GPU info
+// ---------------------------------------------------------------------------
+(async () => {
+  const el = $("gpuInfo");
+  if (!navigator.gpu) {
+    el.innerHTML = `<div class="warnbox">WebGPU isn't available here. Open this page in Chrome or Edge (version 113 or newer).</div>`;
+    $("runBtn").disabled = true;
+    return;
+  }
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!adapter) throw new Error("no adapter");
+    const info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {});
+    const desc = [info.vendor, info.architecture, info.description].filter(Boolean).join(" · ") || "WebGPU adapter found";
+    const maxBuf = adapter.limits?.maxBufferSize ? ` · max buffer ${(adapter.limits.maxBufferSize / 2 ** 30).toFixed(1)} GiB` : "";
+    el.textContent = `WebGPU ready: ${desc}${maxBuf}`;
+  } catch (e) {
+    el.innerHTML = `<div class="warnbox">WebGPU is present but no GPU adapter was found (${escapeHtml(e.message)}). Check that hardware acceleration is on in your browser settings.</div>`;
+  }
+  if (location.protocol === "file:") {
+    el.innerHTML += `<div class="warnbox" style="margin-top:8px">You opened this file directly from disk. Models may not cache this way, so each run would re-download gigabytes. Host it on GitHub Pages or run a local server instead (see the instructions that came with this file).</div>`;
+  }
+})();
+</script>
+</body>
+</html>
