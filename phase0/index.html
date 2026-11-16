@@ -160,6 +160,7 @@ async function ensureModel(key) {
   if (model) { try { await model.model.dispose(); } catch {} model = null; }
   const m = MODELS[key];
   log(`Loading ${m.name} (cached after the first download)…`);
+  if (navigator.storage?.estimate) { try { const est = await navigator.storage.estimate(); log(`  browser storage for this site: ${(est.usage / 1e9).toFixed(1)} GB used of ${(est.quota / 1e9).toFixed(0)} GB allowed`); } catch {} }
   const t0 = performance.now();
   let last = 0; const files = {};
   const progress_callback = (p) => {
@@ -168,8 +169,20 @@ async function ensureModel(key) {
       if (now - last > 2000) { last = now; const l = Object.values(files).reduce((a, f) => a + (f.loaded || 0), 0), t = Object.values(files).reduce((a, f) => a + (f.total || 0), 0); log(`  downloading ${(l / 1e9).toFixed(2)} / ${(t / 1e9).toFixed(2)} GB`); }
     }
   };
-  const processor = await T.AutoProcessor.from_pretrained(m.id);
-  const mdl = await T.Gemma4ForConditionalGeneration.from_pretrained(m.id, { dtype: "q4f16", device: "webgpu", progress_callback });
+  let processor, mdl;
+  try {
+    processor = await T.AutoProcessor.from_pretrained(m.id);
+    mdl = await T.Gemma4ForConditionalGeneration.from_pretrained(m.id, { dtype: "q4f16", device: "webgpu", progress_callback });
+  } catch (e) {
+    const msg = typeof e === "number" || /^\d+$/.test(String(e?.message ?? e))
+      ? `the AI engine ran out of memory or crashed while starting the model (internal code ${e?.message ?? e})`
+      : (e?.message || String(e));
+    log(`Could not start ${m.name}: ${msg}.`);
+    if (key === "gemma-e4b") {
+      log("Tip: close other tabs that use AI (like the bake-off), fully restart Chrome, then try again. Or choose Gemma 4 E2B.");
+    }
+    throw new Error(`${m.name} failed to start`);
+  }
   model = { processor, model: mdl, tokenizer: processor.tokenizer };
   if (SO) { try { SO.StructuredOutputProcessor.warmup?.(model.tokenizer); } catch {} }
   loadedKey = key;
@@ -250,7 +263,7 @@ async function runYears(n) {
     if (world.ended) log("Every mind in the valley is gone. The story has ended.");
     log(pauseRequested ? "Paused." : `Done: ${world.year - startYear} years simulated.`);
   } catch (e) {
-    log("Stopped: " + (e.message || e));
+    log("Stopped: " + (e?.message || (typeof e === "number" ? `internal engine error ${e} (usually out of memory)` : e)));
   } finally {
     running = false;
     $("startBtn").disabled = false; $("stepBtn").disabled = false; $("pauseBtn").disabled = true; $("resetBtn").disabled = false;
