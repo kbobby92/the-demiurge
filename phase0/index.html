@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Demiurge – Phase 0: The Valley of Oren</title>
+<style>
+  :root { --bg:#12141a; --panel:#1b1e27; --panel2:#232735; --text:#e6e8ef; --muted:#9aa0b4; --accent:#e0b354; --good:#5fbf7f; --bad:#e06464; --warn:#e0a454; --line:#2e3344; --blue:#6fa8dc; --purple:#b48ee0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px 10px; border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 2px; font-size:20px; } h1 span { color:var(--accent); }
+  h2 { font-size:15px; margin:0 0 8px; } h3 { font-size:13px; margin:10px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .sub { color:var(--muted); }
+  main { display:grid; grid-template-columns:300px 1fr 380px; gap:14px; padding:14px 18px 40px; }
+  @media (max-width:1250px) { main { grid-template-columns:300px 1fr; } #right { grid-column:1 / -1; } }
+  @media (max-width:800px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .stack > * + * { margin-top:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button { background:var(--accent); color:#1a1400; border:0; border-radius:8px; padding:7px 12px; font-weight:600; cursor:pointer; }
+  button.secondary { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  select, input[type=number] { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
+  label { display:flex; gap:8px; align-items:flex-start; cursor:pointer; }
+  .status { font-family:ui-monospace,Consolas,monospace; font-size:12px; background:#0d0f14; border-radius:8px; padding:8px; max-height:180px; overflow:auto; white-space:pre-wrap; }
+  .bar { height:7px; background:var(--panel2); border-radius:4px; overflow:hidden; } .bar > div { height:100%; background:var(--accent); width:0%; }
+  #chronicle { max-height:calc(100vh - 160px); overflow:auto; padding-right:4px; }
+  .year { border-top:1px solid var(--line); padding-top:8px; margin-top:10px; }
+  .year > .yh { font-weight:700; color:var(--accent); }
+  .ev { margin:4px 0 4px 0; padding-left:10px; border-left:3px solid var(--line); }
+  .ev .speech { display:block; color:var(--muted); font-style:italic; }
+  .ev.revolution, .ev.revolt, .ev.war { border-color:var(--bad); } .ev.revolution { background:#2a1818; }
+  .ev.idea, .ev.rise { border-color:var(--purple); } .ev.belief { border-color:var(--blue); }
+  .ev.death { border-color:#888; } .ev.nature, .ev.army, .ev.diplomacy, .ev.succession { border-color:var(--warn); }
+  .ev.yearline { border-color:transparent; color:var(--muted); font-size:12px; }
+  .ev.summary { border-color:var(--accent); background:#262212; padding:6px 10px; }
+  .stat { display:grid; grid-template-columns:1fr auto; gap:2px 10px; font-size:13px; }
+  .stat .k { color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:12px; } th, td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:600; }
+  .mind { background:var(--panel2); border-radius:8px; padding:8px; margin-top:6px; cursor:pointer; }
+  .mind .t { font-weight:600; } .mind .role { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .mind .say { font-style:italic; color:var(--muted); font-size:12px; margin-top:3px; }
+  .mind .mem { display:none; font-size:12px; margin-top:6px; color:var(--muted); } .mind.open .mem { display:block; }
+  .mind.dead { opacity:.55; }
+  .pill { display:inline-block; padding:0 7px; border-radius:9px; font-size:11px; background:#2a2f40; color:var(--muted); }
+  .idea { background:var(--panel2); border-radius:8px; padding:8px; margin-top:6px; font-size:13px; }
+  .idea q { color:var(--text); font-style:italic; }
+  .warnbox { border:1px solid var(--warn); background:#2b2416; border-radius:8px; padding:8px; font-size:13px; }
+  svg text { fill:var(--muted); font-size:10px; }
+  .filters button { padding:3px 9px; font-weight:500; font-size:12px; }
+  .filters button.active { background:var(--accent); color:#1a1400; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>The Demiurge</span> · Phase 0: The Valley of Oren</h1>
+  <div class="sub">A text-only test. The world runs on hidden rules: drought, Varn's dam, harvests, a fever with a real cause. Up to ten characters think with a local AI model and choose what to do each year. Nothing is scripted. Watch what history comes out of it.</div>
+</header>
+<main>
+  <section class="stack">
+    <div class="panel stack">
+      <h2>Setup</h2>
+      <div><div class="sub">Minds</div>
+        <select id="engine" style="width:100%">
+          <option value="gemma-e4b">Gemma 4 E4B (recommended)</option>
+          <option value="gemma-e2b">Gemma 4 E2B (faster, simpler)</option>
+          <option value="mock">No AI: rule-based stand-ins (instant)</option>
+        </select></div>
+      <div class="row"><span>Years to run</span><input id="years" type="number" min="1" max="200" value="30" style="width:70px"></div>
+      <div class="row"><span>World seed</span><input id="seed" type="number" value="214" style="width:90px"></div>
+      <label><input id="chronicler" type="checkbox" checked> <span>Chronicler writes a summary every 10 years<br><small class="sub">One extra AI call per decade.</small></span></label>
+      <div class="row">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn" class="secondary" disabled>Pause</button>
+        <button id="stepBtn" class="secondary">Step 1 year</button>
+      </div>
+      <div class="row"><button id="resetBtn" class="secondary">New world</button></div>
+      <div class="bar"><div id="progress"></div></div>
+      <div id="eta" class="sub"></div>
+      <div id="status" class="status">Idle.</div>
+    </div>
+    <div class="panel stack">
+      <h2>Export</h2>
+      <div class="row">
+        <button class="secondary" id="copyChron">Copy chronicle</button>
+        <button class="secondary" id="copyJson">Copy full data</button>
+      </div>
+      <div id="copyMsg" class="sub"></div>
+      <div class="sub">Paste either into the chat so we can study what happened.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Chronicle</h2>
+      <div class="filters row" id="filters">
+        <button data-f="all" class="active">Everything</button>
+        <button data-f="major">Major events</button>
+        <button data-f="voices">With speech</button>
+      </div>
+    </div>
+    <div id="chronicle"></div>
+  </section>
+
+  <section id="right" class="stack">
+    <div class="panel">
+      <h2>The realm</h2>
+      <div id="realm" class="stat"></div>
+      <h3>Over time</h3>
+      <div id="chart"></div>
+      <h3>Villages</h3>
+      <table id="villages"></table>
+    </div>
+    <div class="panel">
+      <h2>Minds</h2>
+      <div class="sub" style="font-size:12px">Click a character to see their memories and beliefs.</div>
+      <div id="minds"></div>
+    </div>
+    <div class="panel">
+      <h2>Ideas and faiths</h2>
+      <div id="ideas" class="sub">None yet.</div>
+    </div>
+  </section>
+</main>
+
+<script type="importmap">
+{ "imports": { "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js" } }
+</script>
+<script type="module">
+import { createWorld, stepYear, mockDecide, liveMinds, ideaFollowers } from "./sim.js";
+
+const SO_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers-structured-output@4.3.2/dist/index.js";
+const MODELS = {
+  "gemma-e4b": { name: "Gemma 4 E4B", id: "onnx-community/gemma-4-E4B-it-ONNX" },
+  "gemma-e2b": { name: "Gemma 4 E2B", id: "onnx-community/gemma-4-E2B-it-ONNX" },
+};
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("status");
+function log(msg) { logEl.textContent += `\n[${new Date().toLocaleTimeString()}] ${msg}`; logEl.scrollTop = logEl.scrollHeight; }
+window.addEventListener("error", (e) => log("Page error: " + e.message));
+window.addEventListener("unhandledrejection", (e) => log("Error: " + (e.reason?.message || e.reason)));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let T = null, SO = null, model = null, loadedKey = null;
+let world = createWorld(+$("seed").value);
+let running = false, pauseRequested = false, filter = "all";
+let thinkTimes = [];
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+async function ensureModel(key) {
+  if (key === "mock") return;
+  if (!navigator.gpu) throw new Error("WebGPU is not available. Use Chrome or Edge.");
+  if (!T) { log("Loading Transformers.js…"); T = await import("@huggingface/transformers"); }
+  if (SO === null) { try { SO = await import(SO_URL); log("Structured output ready."); } catch (e) { SO = false; log("Structured output unavailable; will parse JSON by hand."); } }
+  if (loadedKey === key && model) return;
+  if (model) { try { await model.model.dispose(); } catch {} model = null; }
+  const m = MODELS[key];
+  log(`Loading ${m.name} (cached after the first download)…`);
+  const t0 = performance.now();
+  let last = 0; const files = {};
+  const progress_callback = (p) => {
+    if (p.status === "progress" && p.file) {
+      files[p.file] = p; const now = Date.now();
+      if (now - last > 2000) { last = now; const l = Object.values(files).reduce((a, f) => a + (f.loaded || 0), 0), t = Object.values(files).reduce((a, f) => a + (f.total || 0), 0); log(`  downloading ${(l / 1e9).toFixed(2)} / ${(t / 1e9).toFixed(2)} GB`); }
+    }
+  };
+  const processor = await T.AutoProcessor.from_pretrained(m.id);
+  const mdl = await T.Gemma4ForConditionalGeneration.from_pretrained(m.id, { dtype: "q4f16", device: "webgpu", progress_callback });
+  model = { processor, model: mdl, tokenizer: processor.tokenizer };
+  if (SO) { try { SO.StructuredOutputProcessor.warmup?.(model.tokenizer); } catch {} }
+  loadedKey = key;
+  log(`${m.name} ready in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
+}
+
+function extractJson(text) {
+  if (!text) return null;
+  const t = text.replace(/```json|```/g, "");
+  try { return JSON.parse(t.trim()); } catch {}
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (s >= 0 && e > s) { try { return JSON.parse(t.slice(s, e + 1)); } catch {} }
+  return null;
+}
+
+async function generateJson(systemText, userText, schema, maxTokens = 260) {
+  const messages = [{ role: "user", content: [{ type: "text", text: `${systemText}\n\n${userText}` }] }];
+  const prompt = model.processor.apply_chat_template(messages, { add_generation_prompt: true, enable_thinking: false });
+  const inputs = model.tokenizer(prompt, { add_special_tokens: false });
+  const opts = { max_new_tokens: maxTokens, do_sample: true, temperature: 0.8, top_p: 0.95 };
+  if (SO && schema) { try { opts.logits_processor = [new SO.StructuredOutputProcessor(model.tokenizer, { type: "json_schema", json_schema: schema })]; } catch {} }
+  const out = await model.model.generate({ ...inputs, ...opts });
+  const n = inputs.input_ids.dims.at(-1);
+  const text = model.processor.batch_decode(out.slice(null, [n, null]), { skip_special_tokens: true })[0];
+  return extractJson(text);
+}
+
+let deviceLost = false;
+async function aiDecide(mind, prompt, w) {
+  if ($("engine").value === "mock" || deviceLost) return mockDecide(mind, prompt, w);
+  const t0 = performance.now();
+  try {
+    const d = await generateJson(prompt.system, prompt.user, prompt.schema);
+    thinkTimes.push((performance.now() - t0) / 1000); if (thinkTimes.length > 30) thinkTimes.shift();
+    if (!d || !prompt.actions.includes(d.action)) { log(`  ${mind.name}: unreadable answer, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
+    return d;
+  } catch (e) {
+    log(`  ${mind.name}: AI error (${e.message || e}). Using a stand-in choice.`);
+    if (/Device\]? is lost|device lost/i.test(String(e.message))) { deviceLost = true; log("The GPU connection was lost. Pause, reload the page, and continue with a new world."); }
+    return mockDecide(mind, prompt, w);
+  }
+}
+
+async function chronicle(w, fromYear) {
+  const events = w.chronicle.filter((e) => e.year >= fromYear && e.kind !== "act" && e.kind !== "yearline").map((e) => `${e.year}: ${e.text}`).slice(-60);
+  const acts = w.chronicle.filter((e) => e.year >= fromYear && e.kind === "act" && e.speech).slice(-12).map((e) => `${e.year}: ${e.text} ("${e.speech}")`);
+  if ($("engine").value === "mock" || deviceLost || !model) return null;
+  const user = `You are the court chronicler of the Valley of Oren, writing a short entry in the valley's history book about the years ${fromYear} to ${w.year - 1}. Write in the voice of an in-world historian, with your own biases. Use only these events:\n${events.join("\n")}\n${acts.join("\n")}\nReply with JSON: {"title": a short title for this era, "entry": 3-5 sentences}`;
+  const schema = { type: "object", properties: { title: { type: "string", maxLength: 80 }, entry: { type: "string", maxLength: 900 } }, required: ["title", "entry"], additionalProperties: false };
+  try { return await generateJson("You write history for a fictional world in a strategy game. Reply ONLY with one JSON object.", user, schema, 320); }
+  catch (e) { log("Chronicler failed: " + e.message); return null; }
+}
+
+// ---------------------------------------------------------------------------
+// Run loop
+// ---------------------------------------------------------------------------
+async function runYears(n) {
+  if (running) return;
+  running = true; pauseRequested = false;
+  $("startBtn").disabled = true; $("stepBtn").disabled = true; $("pauseBtn").disabled = false; $("resetBtn").disabled = true;
+  try {
+    await ensureModel($("engine").value);
+    const startYear = world.year;
+    for (let i = 0; i < n && !world.ended; i++) {
+      if (pauseRequested) break;
+      log(`Year ${world.year}…`);
+      await stepYear(world, aiDecide, (m, d) => { log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`); render(); });
+      if ($("chronicler").checked && (world.year - 214) % 10 === 0) {
+        log("The chronicler is writing…");
+        const c = await chronicle(world, world.year - 10);
+        if (c) world.chronicle.push({ year: world.year - 1, kind: "summary", text: `${c.title}: ${c.entry}` });
+      }
+      $("progress").style.width = `${((i + 1) / n) * 100}%`;
+      const avg = thinkTimes.length ? thinkTimes.reduce((a, b) => a + b, 0) / thinkTimes.length : 0;
+      $("eta").textContent = avg ? `About ${(avg * liveMinds(world).length).toFixed(0)} s per year (${avg.toFixed(1)} s per thought).` : "";
+      render();
+    }
+    if (world.ended) log("Every mind in the valley is gone. The story has ended.");
+    log(pauseRequested ? "Paused." : `Done: ${world.year - startYear} years simulated.`);
+  } catch (e) {
+    log("Stopped: " + (e.message || e));
+  } finally {
+    running = false;
+    $("startBtn").disabled = false; $("stepBtn").disabled = false; $("pauseBtn").disabled = true; $("resetBtn").disabled = false;
+  }
+}
+
+$("startBtn").addEventListener("click", () => runYears(Math.max(1, +$("years").value || 30)));
+$("stepBtn").addEventListener("click", () => runYears(1));
+$("pauseBtn").addEventListener("click", () => { pauseRequested = true; log("Will pause at the end of this year."); });
+$("resetBtn").addEventListener("click", () => { world = createWorld(+$("seed").value || 214); deviceLost = false; logEl.textContent = "New world created."; render(); });
+$("filters").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; filter = b.dataset.f; document.querySelectorAll("#filters button").forEach((x) => x.classList.toggle("active", x === b)); renderChronicle(); });
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "diplomacy"]);
+function renderChronicle() {
+  const el = $("chronicle");
+  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  const byYear = new Map();
+  for (const e of world.chronicle) {
+    if (filter === "major" && !MAJOR.has(e.kind) && !(e.kind === "belief")) continue;
+    if (filter === "voices" && !(e.speech || MAJOR.has(e.kind))) continue;
+    if (!byYear.has(e.year)) byYear.set(e.year, []);
+    byYear.get(e.year).push(e);
+  }
+  let html = "";
+  for (const [y, evs] of byYear) {
+    html += `<div class="year"><div class="yh">Year ${y}</div>`;
+    for (const e of evs) {
+      const cls = e.kind === "year" ? "yearline" : e.kind;
+      html += `<div class="ev ${cls}">${esc(e.text)}${e.speech ? `<span class="speech">"${esc(e.speech)}"</span>` : ""}</div>`;
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html || `<div class="sub">The chronicle is empty.</div>`;
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+function renderRealm() {
+  const w = world, h = w.history.at(-1);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const rows = [
+    ["Year", w.year], ["Government", w.government.name], ["Trust in rulers", pct(w.legitimacy)], ["Grain tax", `${Math.round(w.tax * 100)} in 100`],
+    ["Royal granary", `${Math.round(w.granary)} sacks`], ["Soldiers", `${w.soldiers} (loyalty ${pct(w.loyalty)})`],
+    ["Varn's dam", w.dam > 0.7 ? "nearly closed" : w.dam > 0.35 ? "half closed" : "mostly open"], ["Relations with Varn", w.varn.relation > 0.3 ? "friendly" : w.varn.relation > -0.2 ? "tense" : "hostile"],
+    ["Greenstone mines", w.mines === "oren" ? "Oren" : "Varn"], ["People in open defiance", h ? `${h.active} of ${w.citizens.filter((c) => c.alive).length} named folk` : "–"],
+  ];
+  $("realm").innerHTML = rows.map(([k, v]) => `<div class="k">${k}</div><div>${esc(v)}</div>`).join("");
+  $("villages").innerHTML = `<tr><th>Village</th><th>People</th><th>Food</th><th>Fever deaths</th><th>Water</th></tr>` +
+    Object.entries(w.villages).map(([n, v]) => `<tr><td>${n}</td><td>${v.pop}</td><td>${h ? Math.round(Math.min(v.food, 1.5) * 100) + "%" : "–"}</td><td>${v.feverDeaths}</td><td>${v.water === "spring" ? "spring" : v.wells ? "wells" : "river"}</td></tr>`).join("");
+  renderChart();
+}
+
+function renderChart() {
+  const H = world.history; if (H.length < 2) { $("chart").innerHTML = `<div class="sub" style="font-size:12px">Appears after two years.</div>`; return; }
+  const W = 340, Ht = 110, pad = 22;
+  const x = (i) => pad + (i / (H.length - 1)) * (W - pad - 6);
+  const maxPop = Math.max(...H.map((h) => h.pop)) * 1.05;
+  const yPop = (p) => Ht - pad - (p / maxPop) * (Ht - pad - 6);
+  const yL = (l) => Ht - pad - l * (Ht - pad - 6);
+  const line = (f) => H.map((h, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${f(h).toFixed(1)}`).join(" ");
+  const revs = world.chronicle.filter((e) => e.kind === "revolution" || e.kind === "war").map((e) => ({ i: H.findIndex((h) => h.year === e.year), k: e.kind })).filter((r) => r.i >= 0);
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${Ht}" width="100%">
+    <line x1="${pad}" y1="${Ht - pad}" x2="${W - 6}" y2="${Ht - pad}" stroke="#2e3344"/>
+    ${revs.map((r) => `<line x1="${x(r.i)}" y1="6" x2="${x(r.i)}" y2="${Ht - pad}" stroke="${r.k === "war" ? "#e0a454" : "#e06464"}" stroke-dasharray="2 3"/>`).join("")}
+    <path d="${line((h) => yPop(h.pop))}" fill="none" stroke="#6fa8dc" stroke-width="2"/>
+    <path d="${line((h) => yL(h.legitimacy))}" fill="none" stroke="#e0b354" stroke-width="2"/>
+    <text x="${pad}" y="${Ht - 6}">${H[0].year}</text><text x="${W - 30}" y="${Ht - 6}">${H.at(-1).year}</text>
+    <text x="${pad + 2}" y="12" style="fill:#6fa8dc">population</text><text x="${pad + 70}" y="12" style="fill:#e0b354">trust in rulers</text>
+    <text x="${pad + 160}" y="12" style="fill:#e06464">┆ revolution</text><text x="${pad + 225}" y="12" style="fill:#e0a454">┆ war</text>
+  </svg>`;
+}
+
+const openMinds = new Set();
+function renderMinds() {
+  const all = [...world.minds].sort((a, b) => (b.alive - a.alive) || a.id - b.id);
+  $("minds").innerHTML = all.map((m) => {
+    const idea = m.ideaId ? world.ideas.find((i) => i.id === m.ideaId) : null;
+    return `<div class="mind ${m.alive ? "" : "dead"} ${openMinds.has(m.id) ? "open" : ""}" data-id="${m.id}">
+      <div class="row" style="justify-content:space-between"><span class="t">${esc(m.title)}</span><span class="role">${m.alive ? m.role : "gone"}</span></div>
+      ${m.alive ? `<div style="font-size:12px">${m.lastAction ? "Last: " + esc(m.lastAction.replace(/_/g, " ")) : "Has not acted yet"}${idea ? ` · <span class="pill">${esc(idea.name)}</span>` : ""}</div>` : `<div style="font-size:12px">${esc(m.fate || "")}</div>`}
+      ${m.lastSpeech ? `<div class="say">"${esc(m.lastSpeech)}"</div>` : ""}
+      <div class="mem"><b>Drives:</b> ${esc(m.motive)}<br><b>Believes the drought comes from:</b> ${esc((m.beliefs.drought || "?").replace(/_/g, " "))}; <b>the fever from:</b> ${esc((m.beliefs.fever || "?").replace(/_/g, " "))}<br>${m.lastReason ? `<b>Private thoughts:</b> ${esc(m.lastReason)}<br>` : ""}<b>Remembers:</b><ul style="margin:4px 0 0 16px;padding:0">${m.memories.slice(-6).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll(".mind").forEach((el) => el.addEventListener("click", () => { const id = +el.dataset.id; openMinds.has(id) ? openMinds.delete(id) : openMinds.add(id); el.classList.toggle("open"); }));
+}
+
+function renderIdeas() {
+  if (!world.ideas.length) { $("ideas").innerHTML = "None yet."; return; }
+  $("ideas").innerHTML = world.ideas.map((i) => {
+    const f = ideaFollowers(world, i);
+    const ruling = world.government.ideaId === i.id;
+    return `<div class="idea"><b>${esc(i.name)}</b> <span class="pill">${i.kind === "faith" ? "faith" : "politics"}</span>${ruling ? ' <span class="pill" style="color:#5fbf7f">rules the valley</span>' : ""}<br>
+      <span class="sub">Founded by ${esc(i.founder)} in ${i.born} · about ${f.total} followers</span><br><q>${esc(i.tenet)}</q>
+      ${i.history.length > 1 ? `<details><summary class="sub" style="font-size:12px">How it changed (${i.history.length - 1})</summary>${i.history.map((x) => `<div style="font-size:12px">${x.year}: <q>${esc(x.tenet)}</q></div>`).join("")}</details>` : ""}</div>`;
+  }).join("");
+}
+
+function render() { renderChronicle(); renderRealm(); renderMinds(); renderIdeas(); }
+render();
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); $("copyMsg").textContent = "Copied."; } catch { $("copyMsg").textContent = "Copy failed."; }
+  setTimeout(() => ($("copyMsg").textContent = ""), 3000);
+}
+$("copyChron").addEventListener("click", () => {
+  let out = `THE VALLEY OF OREN (seed ${world.seed}, minds: ${$("engine").selectedOptions[0].text})\n`;
+  let y = null;
+  for (const e of world.chronicle) {
+    if (e.year !== y) { y = e.year; out += `\n== Year ${y} ==\n`; }
+    out += `- ${e.text}${e.speech ? ` "${e.speech}"` : ""}\n`;
+  }
+  out += `\nIDEAS:\n${world.ideas.map((i) => `- ${i.name} (${i.kind}, ${i.founder}, ${i.born}): "${i.tenet}" ~${ideaFollowers(world, i).total} followers`).join("\n")}`;
+  copyText(out);
+});
+$("copyJson").addEventListener("click", () => {
+  const data = { seed: world.seed, engine: $("engine").value, year: world.year, government: world.government, history: world.history,
+    minds: world.minds.map(({ id, name, title, role, alive, fate, motive, beliefs, ideaId, memories, lastAction, lastSpeech, lastReason }) => ({ id, name, title, role, alive, fate, motive, beliefs, ideaId, memories, lastAction, lastSpeech, lastReason })),
+    ideas: world.ideas.map((i) => ({ ...i, followers: ideaFollowers(world, i).total })), chronicle: world.chronicle, log: logEl.textContent.split("\n").slice(-200) };
+  copyText(JSON.stringify(data, null, 2));
+});
+
+if (location.protocol === "file:") log("Opened from disk: host this page (GitHub Pages or a local server) so the model can be cached.");
+log(`World ready. Year ${world.year}. Choose the minds and press Start.`);
+</script>
+</body>
+</html>
