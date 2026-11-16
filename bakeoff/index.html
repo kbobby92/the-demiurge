@@ -296,8 +296,8 @@ const ideologySchema = {
   type: "object",
   properties: {
     movement_name: { type: "string" },
-    core_ideas: { type: "array", items: { type: "string" } },
-    pitch_to_neighbors: { type: "string" },
+    core_ideas: { type: "array", items: { type: "string", maxLength: 140 }, minItems: 2, maxItems: 4 },
+    pitch_to_neighbors: { type: "string", maxLength: 500 },
     first_step: { type: "string" },
   },
   required: ["movement_name", "core_ideas", "pitch_to_neighbors", "first_step"],
