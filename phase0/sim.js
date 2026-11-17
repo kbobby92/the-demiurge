@@ -185,6 +185,8 @@ export function createOrUpdateIdea(w, mind, text, opts = {}) {
     followed.history.push({ year: w.year, tenet: clean, by: mind.name });
     return followed;
   }
+  const sameName = opts.name && w.ideas.find((i) => i.name.toLowerCase() === opts.name.toLowerCase() && i.founderId !== mind.id);
+  if (sameName) { sameName.history.push({ year: w.year, tenet: clean, by: mind.name }); mind.ideaId = sameName.id; return sameName; }
   let idea = w.ideas.find((i) => i.founderId === mind.id && (!opts.creditsGod || i.creditsGod));
   const kind = opts.kind || (mind.role === "priest" || mind.role === "prophet" ? "faith" : "politics");
   if (idea) {
@@ -273,6 +275,18 @@ function actionsFor(w, mind) {
   return list;
 }
 
+function bondWord(w, a, b) {
+  const v = (w.bonds || {})[[a.id, b.id].sort().join("|")];
+  return v > 0.5 ? ", your firm ally" : v > 0.1 ? ", on good terms with you" : v < -0.5 ? ", your enemy" : v < -0.1 ? ", at odds with you" : "";
+}
+function recentDeeds(m) {
+  const h = m.deedHistory || [];
+  if (!h.length) return "";
+  const last = h.slice(-3);
+  const same = last.length === 3 && last.every((x) => x.key === last[0].key);
+  return `Your deeds in recent years: ${last.map((x) => `${x.year}: ${x.text}`).join(" | ")}.${same ? " You have done the same thing three years running and the valley has not changed for it; consider a bolder or different way to reach your goals." : ""}\n`;
+}
+
 export function buildPrompt(w, mind) {
   const actions = actionsFor(w, mind);
   const user = `${WORLD_TEXT}
@@ -280,7 +294,7 @@ export function buildPrompt(w, mind) {
 YEAR ${w.year}.
 YOU ARE: ${mind.title === mind.name ? mind.name : `${mind.title} (${mind.name})`}.
 WHAT DRIVES YOU MOST: ${mind.motive}${mind.divine && w.year - mind.divine.year <= 4 ? `
-A COMMAND YOU BELIEVE CAME FROM ${String(mind.divine.god || "a god").toUpperCase()} (in ${mind.divine.year}): "${mind.divine.message}". You ${mind.divine.obey === "yes" ? "swore to obey it" : mind.divine.obey === "no" ? "refused it, but it haunts you" : "have not decided whether to obey"}.` : ""}
+A COMMAND YOU BELIEVE CAME FROM ${String(mind.divine.god || "a god").toUpperCase()} (in ${mind.divine.year}): "${mind.divine.message}". You ${mind.divine.obey === "yes" ? "swore to obey it. If you still mean to, let this year's deed carry it out in a concrete way" : mind.divine.obey === "no" ? "refused it, but it haunts you" : "have not decided whether to obey"}.` : ""}
 Personality: ${mind.traits}.
 Goals: ${mind.goals}.
 Secret (only you know): ${mind.secret}
@@ -288,8 +302,8 @@ What you remember:
 ${mind.memories.map((m) => "- " + m).join("\n")}
 What you see and hear this year:
 ${observationsFor(w, mind).map((o) => "- " + o).join("\n")}
-Other notable people: ${liveMinds(w).filter((m) => m !== mind).map((m) => `${m.name} (${m.role === "foreign" ? "ruler of Varn" : m.role}, ${m.place})`).join("; ")}.
-
+Other notable people: ${liveMinds(w).filter((m) => m !== mind).map((m) => `${m.name} (${m.role === "foreign" ? "ruler of Varn" : m.role}, ${m.place}${bondWord(w, mind, m)})`).join("; ")}.
+${recentDeeds(mind)}
 TASK: Decide what you do this year. You may attempt ANYTHING a person in your place could really try: act openly or in secret, alone or with others, kindly or cruelly. Describe it in "deed" in your own words: what you do, where, to whom, and how (1-2 sentences). The world decides whether it works.
 Usual choices for someone like you: ${actions.join(", ")}. If your deed is one of these, name it in "usual_action"; if it is anything else, put "something_else".
 Also say what you believe causes the drought and what causes the fever (from: ${CAUSES.join(", ")}). If you have formed a NEW idea about how the valley should live or be ruled, or what the gods want, state it in one sentence of your own words in new_idea; otherwise leave it empty.
@@ -784,6 +798,7 @@ export async function stepYear(w, decide, onMind, translate) {
       fx = listedFx(w, m, act, w.yearEvents.at(-1)?.who === m.name ? w.yearEvents.at(-1).text : "");
     }
     w.legitimacy = clamp(w.legitimacy); w.loyalty = clamp(w.loyalty);
+    m.deedHistory = [...(m.deedHistory || []), { year: w.year, key: freeform ? "deed:" + (d.translation?.effects?.[0]?.block || "") : act, text: freeform ? String(d.deed).slice(0, 90) : act.replace(/_/g, " ") }].slice(-5);
     const last = w.yearEvents.at(-1); if (d.speech && last && last.who === m.name) last.speech = d.speech;
     await onMind?.(m, d, fx);
   }

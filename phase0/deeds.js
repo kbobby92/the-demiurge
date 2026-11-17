@@ -75,7 +75,7 @@ EFFECT BLOCKS:
 - shift_opinion: make people at a place trust "person" more (increase) or less (decrease).
 - spread_idea / suppress_idea: preach, teach or ban an idea or faith. text = the idea in one sentence.
 - relationship: make or break a bond with a person (look: ally, betray, bribe, fear for threats, love for marriage).
-- take_power: seize rule of the valley. give_power: hand power to a person, or to councils if person is "none".
+- take_power: ONLY when the actor openly tries to overthrow the ruler and rule the valley themselves (a coup or revolt). Meetings, demands, pacts and influence are NOT take_power. give_power: the ruler hands power to a person, or to councils if person is "none".
 - give_or_trade: give or trade grain to a place or person. text = the terms.
 - speak_to: a private message to a person. text = what is said.
 
@@ -197,12 +197,17 @@ function isMajor(t) { return t.effects.some((e) => ["fight", "take_power", "give
 function lowerDeed(s) { s = String(s || "").trim().replace(/\.$/, ""); return s ? s[0].toLowerCase() + s.slice(1) : "act"; }
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
+// Words that show a deed really aims at ruling the valley.
+const COUP = /(seiz\w*|tak\w*|grab\w*|claim\w*|assum\w*)\s+(the\s+|all\s+)?(power|throne|crown|rule|reins|command of the (valley|realm)|control of (the\s+)?(valley|kessa|realm|council|government))|overthrow|depos|usurp|\bcoup\b|topple|oust|dethrone|abdicat|step down|hand (over )?(power|the throne|rule)|name .* (ruler|heir|successor)/i;
+
 function sanitize(w, m, t, d) {
   if (!t || typeof t !== "object") t = mockTranslate(w, m, d.deed);
   t.summary = String(t.summary || `${m.name} ${d.deed}`).trim();
   if (!t.summary.startsWith(m.name)) t.summary = `${m.name}: ${t.summary}`;
   t.effects = Array.isArray(t.effects) && t.effects.length ? t.effects : mockTranslate(w, m, d.deed).effects;
   t.effects = t.effects.filter((e) => e && BLOCKS.includes(e.block));
+  // Rule changes hands only when the deed says so: a meeting or a demand is not a coup.
+  if (!COUP.test(`${d.deed} ${d.speech || ""}`)) t.effects = t.effects.filter((e) => e.block !== "take_power" && e.block !== "give_power");
   if (!t.effects.length) t.effects = [{ block: "speak_to", place: "none", person: "the people", resource: "none", direction: "increase", look: "persuade", text: d.speech || "" }];
   if (!(t.scale in SCALES)) t.scale = "medium";
   return t;
@@ -215,7 +220,7 @@ function applyEffect(w, m, e, j, t) {
   const ok = j.outcome !== "failure";
   let P = resolvePlace(w, e.place, m);
   // Village-only things aimed at no particular village: pick the most restless one (or the hungriest).
-  if (!V[P] && P !== "Varn" && ["fields", "food", "wells", "people", "water"].includes(e.resource) && !(e.resource === "water" && P === "Kessa") || (!V[P] && ["recruit", "spread_idea"].includes(e.block) && P === "Kessa" && !["ruler", "general", "priest"].includes(m.role))) {
+  if (e.block === "change_resource" && !V[P] && P !== "Varn" && ["fields", "food", "wells", "people", "water"].includes(e.resource) && !(e.resource === "water" && P === "Kessa") || (!V[P] && ["recruit", "spread_idea"].includes(e.block) && P === "Kessa" && !["ruler", "general", "priest"].includes(m.role))) {
     const vs = VILLAGES(w);
     const restless = (v) => w.citizens.filter((c) => c.alive && c.village === v && c.active).length;
     P = vs.slice().sort((a, b) => restless(b) - restless(a) || V[a].food - V[b].food)[0];
@@ -296,8 +301,9 @@ function applyEffect(w, m, e, j, t) {
 
     case "move_people": {
       if (P === "Varn") { if (m.role !== "foreign") remember(m, `You crossed into Varn.`); return { fx, text: `${m.name} crossed the ridge into Varn and returned.` }; }
+      if (m.role === "foreign") return { fx: { ...fx, from: "Varn" }, text: "" };  // envoys travel; the ruler of Varn stays home
       const from = m.place;
-      if (m.role !== "foreign") m.place = P;
+      m.place = P;
       if (ok && j.scale !== "small" && V[from] && V[P] && from !== P) {
         const n = round(V[from].pop * M * 0.3); V[from].pop -= n; V[P].pop += n;
         return { fx: { ...fx, from }, text: `About ${n} people moved from ${from} to ${P}.` };
@@ -442,6 +448,7 @@ function applyEffect(w, m, e, j, t) {
 
     case "give_or_trade": {
       if (!ok) return { fx };
+      if ((!e.place || e.place === "none") && X && X.role !== "foreign" && !V[X.place]) { P = "Kessa"; fx.place = "Kessa"; }
       const amt = round(M * 200);
       const fromCrown = m.role === "ruler";
       if (fromCrown && w.granary < amt) return { fx, text: `The granary was too empty to give much.` };
@@ -477,10 +484,12 @@ function granary(w, up, M, fx) {
 function opinion(w, m, X, up, M, P, fx) {
   const r = rulerOf(w);
   const local = !!w.villages[P];
+  if (!X && up && m !== r) X = m;
   if (!X || X === r) { w.legitimacy = clamp(w.legitimacy + (up ? 1 : -1) * M * (local ? 0.25 : 0.35)); return { fx, text: up ? `Trust in ${w.government.name} grew.` : `Trust in ${w.government.name} fell.` }; }
   if (X.role === "general") { w.loyalty = clamp(w.loyalty + (up ? 1 : -1) * M * 0.3); return { fx, text: up ? `The soldiers thought better of ${X.name}.` : `The soldiers began to doubt ${X.name}.` }; }
   X.standing = clamp((X.standing || 0) + (up ? M : -M), -1, 1);
-  remember(X, `People${local ? ` in ${P}` : ""} now think ${up ? "better" : "worse"} of you.`);
+  if (X === m && up && m.ideaId) { const idea = w.ideas.find((i) => i.id === m.ideaId); const slot = idea?.kind === "faith" ? "faith" : "idea"; for (const c of w.citizens) if (idea && c.alive && (!local || c.village === P) && !c[slot] && w.rng.chance(M * 0.6)) c[slot] = idea.id; }
+  if (X !== m) remember(X, `People${local ? ` in ${P}` : ""} now think ${up ? "better" : "worse"} of you.`);
   return { fx, text: up ? `${X.name}'s name rose${local ? ` in ${P}` : ""}.` : `${X.name}'s name was blackened${local ? ` in ${P}` : ""}.` };
 }
 
