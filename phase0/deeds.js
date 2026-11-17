@@ -470,7 +470,7 @@ function applyEffect(w, m, e, j, t) {
 
 function granary(w, up, M, fx) {
   if (up) { const n = round(M * 300); w.granary += n; return { fx: { ...fx, place: "Kessa" }, text: `About ${n} sacks were added to the royal granary.` }; }
-  const n = round(Math.min(w.granary, w.granary * M * 1.5 + 30)); w.granary -= n;
+  const n = round(Math.min(w.granary, w.granary * M * 0.6 + 20)); w.granary -= n;
   return { fx: { ...fx, place: "Kessa" }, text: `About ${n} sacks of the royal granary were lost.` };
 }
 
@@ -493,7 +493,9 @@ export function mockTranslate(w, m, deed) {
   const STOP = new Set(["of", "the", "king", "queen", "general", "high", "priest", "priestess", "captain", "monarch", "prince", "lord", "protector", "speaker", "grain", "merchant", "trader", "low", "ford", "reedmere", "hollowmere", "varn", "valley", "council"]);
   const keys = (x) => x.name.toLowerCase().split(/[\s,]+/).filter((k) => k.length > 2 && !STOP.has(k));
   const person = liveMinds(w).find((x) => x !== m && keys(x).some((k) => new RegExp(`\\b${k}\\b`).test(s)))
-    || (/\bthe (king|ruler|crown)\b/.test(s) ? rulerOf(w) : null);
+    || (/\bthe (king|ruler|crown|queen)\b/.test(s) ? rulerOf(w) : null)
+    || (/\bthe (general|army commander|captain)\b/.test(s) ? liveMinds(w).find((x) => x.role === "general") : null)
+    || (/\bthe (high )?priest(ess)?\b/.test(s) ? liveMinds(w).find((x) => x.role === "priest") : null);
   const P = person && person !== m ? person.name : "none";
   const E = (block, resource = "none", direction = "decrease", look = "other", text = "", pl = place, pe = P) => ({ block, place: pl, person: pe, resource, direction, look, text });
   const effects = [];
@@ -511,7 +513,8 @@ export function mockTranslate(w, m, deed) {
   if (/slander|rumou?r|shame/.test(s)) effects.push(E("shift_opinion", "none", "decrease", "persuade"));
   if (/go to|travel|march to|move to/.test(s) && place !== "none") effects.unshift(E("move_people", "none", "increase", "other"));
   if (/tell|warn|write to|send word/.test(s) && person) effects.push(E("speak_to", "none", "increase", "persuade", deed));
-  if (!effects.length) effects.push(E("spread_idea", "none", "increase", "persuade", deed));
+  // No recognisable deed: treat it as building the actor's own standing, without inventing an idea from the words.
+  if (!effects.length) effects.push(E("shift_opinion", "none", "increase", "persuade", "", place, m.name));
   return {
     summary: `${m.name} tried to ${lowerDeed(deed).slice(0, 140)}`,
     possible: !/lightning|fly|summon|magic|curse the/.test(s), impossible_reason: "no mortal can do that",

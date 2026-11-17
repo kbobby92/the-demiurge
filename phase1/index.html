@@ -76,7 +76,9 @@
         <button id="resetBtn" class="secondary">New world</button>
         <span id="yearLabel" class="sub"></span>
       </div>
+      <div id="aiBanner" class="warnbox" style="display:none;margin-top:8px;border-color:#e06464;background:#2b1616"></div>
       <div id="status" class="status" style="margin-top:8px">Idle.</div>
+      <div class="row" style="margin-top:6px"><button class="secondary" id="copyLog" style="padding:4px 9px;font-size:12px">Copy status log</button><span id="copyLogMsg" class="sub"></span></div>
     </div>
     <div class="panel">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">Chronicle</h2>
@@ -186,7 +188,8 @@ async function generateJson(system, user, schema, maxTokens = 260) {
       const n = inputs.input_ids.dims.at(-1);
       return extractJson(model.processor.batch_decode(out.slice(null, [n, null]), { skip_special_tokens: true })[0]);
     } catch (e) {
-      if (/is lost|device lost/i.test(String(e?.message))) { deviceLost = true; log("GPU connection lost: switching to stand-in minds. Reload the page to restore the AI."); }
+      log(`  AI error: ${e?.message || e}`);
+      if (/is lost|device lost|lost|destroyed|disposed|out of memory|OOM|^\d+$/i.test(String(e?.message ?? e))) aiDown(String(e?.message ?? e));
       throw e;
     }
   });
@@ -198,17 +201,26 @@ async function aiDecide(mind, prompt, w) {
     const d = await generateJson(prompt.system, prompt.user, prompt.schema, 420);
     if (!d || !(prompt.actions.includes(d.usual_action) || d.usual_action === "something_else")) return mockDecide(mind, prompt, w);
     return d;
-  } catch (e) { log(`  ${mind.name}: AI error, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
+  } catch (e) { log(`  ${mind.name}: AI error (${e?.message || e}), using a stand-in choice for this turn.`); return mockDecide(mind, prompt, w); }
+}
+// The GPU stopped answering: stop the history instead of quietly continuing with stand-ins.
+function aiDown(why) {
+  if (deviceLost) return;
+  deviceLost = true; pauseRequested = true;
+  world.chronicle.push({ year: world.year, kind: "setting", text: `(The AI stopped here: ${why}. Anything after this until a reload was played by stand-in minds.)` });
+  $("aiBanner").style.display = "block";
+  $("aiBanner").innerHTML = `<b>The AI stopped answering</b> (${esc(why)}). The history will pause at the end of this year. Copy the chronicle if you want it, then reload the page (Ctrl+F5) to restart the AI. Close other AI tabs or pick Gemma E2B if it keeps happening.`;
+  log("AI stopped: " + why + ". Pausing at the end of this year.");
 }
 // Turns an unusual deed into building blocks. Returning null makes the simulation use its keyword stand-in.
 async function aiTranslate(mind, prompt, w) {
   if (useMock()) return null;
-  try { return await generateJson(prompt.system, prompt.user, prompt.schema, 420); }
+  try { const t = await generateJson(prompt.system, prompt.user, prompt.schema, 420); if (t) t.__ai = true; return t; }
   catch (e) { log(`  could not translate ${mind.name}'s deed; using a rough reading.`); return null; }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function onMind(m, d, fx) {
-  if (d.action === "something_else") log(`  ${m.name}: ${d.deed}${fx?.outcome ? ` → ${fx.outcome}` : ""}`);
+  if (d.action === "something_else") log(`  ${m.name}: ${d.deed}${fx?.outcome ? ` → ${fx.outcome}` : ""}${d.translation && !d.translation.__ai ? " (rough reading)" : ""}`);
   else log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`);
   renderSide();
   if (fx) pop.playDeed(fx, world, () => refreshMap());
@@ -272,7 +284,7 @@ function setButtons() {
 $("startBtn").onclick = () => runYears(Math.max(1, +$("years").value || 30));
 $("stepBtn").onclick = () => runYears(1);
 $("pauseBtn").onclick = () => { pauseRequested = true; log("Will pause at the end of this year."); };
-$("resetBtn").onclick = () => { world = createWorld(+$("seed").value || 214); deviceLost = false; selected = null; pop.agents.clear(); refreshMap(); renderAll(); logEl.textContent = "New world."; };
+$("resetBtn").onclick = () => { world = createWorld(+$("seed").value || 214); deviceLost = false; $("aiBanner").style.display = "none"; selected = null; pop.agents.clear(); refreshMap(); renderAll(); logEl.textContent = "New world."; };
 
 // ---------------------------------------------------------------------------
 // Selecting people
@@ -408,6 +420,7 @@ function renderSide() { renderFeed(); renderPower(); }
 function renderAll() { renderRealm(); renderPower(); renderMindsList(); renderFeed(); if (selected) { renderSelected(); renderGodTarget(); } }
 renderAll();
 
+$("copyLog").onclick = async () => { try { await navigator.clipboard.writeText(logEl.textContent); $("copyLogMsg").textContent = "Copied."; } catch { $("copyLogMsg").textContent = "Copy failed."; } setTimeout(() => ($("copyLogMsg").textContent = ""), 3000); };
 $("copyChron").onclick = async () => {
   let out = `THE VALLEY OF OREN – map run (seed ${world.seed})\n`; let y = null;
   for (const e of world.chronicle) { if (e.year !== y) { y = e.year; out += `\n== Year ${y} ==\n`; } out += `- ${e.text}${e.speech ? ` "${e.speech}"` : ""}\n`; }

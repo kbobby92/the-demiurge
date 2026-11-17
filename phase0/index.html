@@ -221,7 +221,7 @@ async function aiDecide(mind, prompt, w) {
     return d;
   } catch (e) {
     log(`  ${mind.name}: AI error (${e.message || e}). Using a stand-in choice.`);
-    if (/Device\]? is lost|device lost/i.test(String(e.message))) { deviceLost = true; log("The GPU connection was lost. Pause, reload the page, and continue with a new world."); }
+    if (!deviceLost && /lost|destroyed|disposed|out of memory|OOM|^\d+$/i.test(String(e?.message ?? e))) { deviceLost = true; pauseRequested = true; world.chronicle.push({ year: world.year, kind: "setting", text: `(The AI stopped here: ${e?.message ?? e}. Reload the page to restart it.)` }); log("The AI stopped answering. Pausing at the end of this year; reload the page (Ctrl+F5) to restart it."); }
     return mockDecide(mind, prompt, w);
   }
 }
