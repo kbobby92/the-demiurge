@@ -13,9 +13,10 @@ const CHANNEL_TEXT = {
 function citizenProfile(w, c) {
   const v = w.villages[c.village];
   const idea = c.idea ? w.ideas.find((i) => i.id === c.idea) : null;
+  const faith = c.faith ? w.ideas.find((i) => i.id === c.faith) : null;
   return `YOU ARE: ${c.name} of ${c.village}, a ${c.trait} ${c.job} aged ${c.age}.
 Your life: ${c.grief > 0.5 ? "you have recently buried people you loved" : c.grief > 0.2 ? "you have lost neighbors to hunger and fever" : "you have kept your family alive so far"}. Your village ${v.food < 0.75 ? "is going hungry" : v.food < 0.95 ? "is getting by on little" : "has enough to eat"}; ${v.feverDeaths} died of fever there last year.
-${idea ? `You follow ${idea.name}, which says: "${idea.tenet}"` : "You follow no cause."} ${c.active ? "You have begun to openly defy the rulers." : ""}
+${idea ? `You follow ${idea.name}, which says: "${idea.tenet}"` : "You follow no political cause."} ${faith ? `Your faith is ${faith.name}: "${faith.tenet}"` : ""} ${c.active ? "You have begun to openly defy the rulers." : ""}
 ${c.creditsGod ? `You believe ${c.godName || "a god"} has spoken to you before.` : ""}
 What you remember: ${(c.memories || []).slice(-5).join(" ") || "nothing out of the ordinary."}`;
 }
@@ -97,6 +98,7 @@ export function applyGodAct(w, target, channel, message, r) {
   if (r.believes_a_god_spoke) {
     target.creditsGod = true;
     if (r.god_name) target.godName = r.god_name;
+    if (isMind && channel !== "sign") target.divine = { year: w.year, message, god: r.god_name || target.godName, obey: r.will_obey };
   }
 
   // A sign is seen by the whole village (or the fort).
@@ -119,6 +121,7 @@ export function applyGodAct(w, target, channel, message, r) {
       m.motive = `${m.godName} spoke to you: "${message}".`;
       m.goals = `make the valley hear what ${m.godName} told you`;
       m.memories.push(memo);
+      m.divine = { year: w.year, message, god: m.godName, obey: r.will_obey };
       speaker = m;
     }
   }

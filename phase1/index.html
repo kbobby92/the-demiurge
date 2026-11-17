@@ -276,9 +276,10 @@ function renderSelected() {
   const s = selected.ref;
   if (selected.kind === "citizen") {
     const idea = s.idea ? world.ideas.find((i) => i.id === s.idea) : null;
+    const faith = s.faith ? world.ideas.find((i) => i.id === s.faith) : null;
     el.innerHTML = `<div class="card"><div class="name">${esc(s.name)} of ${esc(s.village)}</div>
       <div class="role">${esc(s.job)} · age ${s.age} · ${esc(s.trait)}</div>
-      <div style="font-size:13px;margin-top:4px">${s.active ? '<b style="color:#e06464">In open defiance.</b> ' : ""}${idea ? `Follows <b>${esc(idea.name)}</b>. ` : "Follows no cause. "}${s.creditsGod ? `Believes <b>${esc(s.godName || "a god")}</b> has shown itself. ` : ""}${s.grief > 0.4 ? "Grieving." : ""}</div>
+      <div style="font-size:13px;margin-top:4px">${s.active ? '<b style="color:#e06464">In open defiance.</b> ' : ""}${idea ? `Follows <b>${esc(idea.name)}</b>. ` : "Follows no cause. "}${faith ? `Worships through <b>${esc(faith.name)}</b>. ` : ""}${s.creditsGod ? `Believes <b>${esc(s.godName || "a god")}</b> has shown itself. ` : ""}${s.grief > 0.4 ? "Grieving." : ""}</div>
       <div id="thought" class="quote"></div>
       <button class="secondary" id="thinkBtn">Hear their thoughts</button></div>`;
     $("thinkBtn").onclick = () => hearThoughts(s);
