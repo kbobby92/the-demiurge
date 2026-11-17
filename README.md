@@ -17,5 +17,5 @@ Design stage. The first test is the **model bake-off**, which compares small ope
 
 - `index.html` – project landing page (the game will live here later)
 - `phase1/` – pixel map of the valley (`map.js`) and speaking as god (`god.js`), built on the Phase 0 simulation
-- `phase0/` – Phase 0 text-only story test (`sim.js` is the simulation core; `index.html` runs it with Gemma 4)
+- `phase0/` – Phase 0 text-only story test (`sim.js` is the simulation core; `deeds.js` turns free-form deeds into building blocks and judges them; `index.html` runs it with Gemma 4)
 - `bakeoff/` – local model bake-off test page

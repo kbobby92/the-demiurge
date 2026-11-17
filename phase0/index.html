@@ -215,9 +215,9 @@ async function aiDecide(mind, prompt, w) {
   if ($("engine").value === "mock" || deviceLost) return mockDecide(mind, prompt, w);
   const t0 = performance.now();
   try {
-    const d = await generateJson(prompt.system, prompt.user, prompt.schema);
+    const d = await generateJson(prompt.system, prompt.user, prompt.schema, 420);
     thinkTimes.push((performance.now() - t0) / 1000); if (thinkTimes.length > 30) thinkTimes.shift();
-    if (!d || !prompt.actions.includes(d.action)) { log(`  ${mind.name}: unreadable answer, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
+    if (!d || !(prompt.actions.includes(d.usual_action) || d.usual_action === "something_else")) { log(`  ${mind.name}: unreadable answer, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
     return d;
   } catch (e) {
     log(`  ${mind.name}: AI error (${e.message || e}). Using a stand-in choice.`);
@@ -225,10 +225,15 @@ async function aiDecide(mind, prompt, w) {
     return mockDecide(mind, prompt, w);
   }
 }
+async function aiTranslate(mind, prompt, w) {
+  if ($("engine").value === "mock" || deviceLost) return null;
+  try { return await generateJson(prompt.system, prompt.user, prompt.schema, 420); }
+  catch { log(`  could not translate ${mind.name}'s deed; using a rough reading.`); return null; }
+}
 
 async function chronicle(w, fromYear) {
   const events = w.chronicle.filter((e) => e.year >= fromYear && e.kind !== "act" && e.kind !== "yearline").map((e) => `${e.year}: ${e.text}`).slice(-60);
-  const acts = w.chronicle.filter((e) => e.year >= fromYear && e.kind === "act" && e.speech).slice(-12).map((e) => `${e.year}: ${e.text} ("${e.speech}")`);
+  const acts = w.chronicle.filter((e) => e.year >= fromYear && (e.kind === "act" || e.kind === "deed") && e.speech).slice(-12).map((e) => `${e.year}: ${e.text} ("${e.speech}")`);
   if ($("engine").value === "mock" || deviceLost || !model) return null;
   const user = `You are the court chronicler of the Valley of Oren, writing a short entry in the valley's history book about the years ${fromYear} to ${w.year - 1}. Write in the voice of an in-world historian, with your own biases. Use only these events:\n${events.join("\n")}\n${acts.join("\n")}\nReply with JSON: {"title": a short title for this era, "entry": 3-5 sentences}`;
   const schema = { type: "object", properties: { title: { type: "string", maxLength: 80 }, entry: { type: "string", maxLength: 900 } }, required: ["title", "entry"], additionalProperties: false };
@@ -249,7 +254,7 @@ async function runYears(n) {
     for (let i = 0; i < n && !world.ended; i++) {
       if (pauseRequested) break;
       log(`Year ${world.year}…`);
-      await stepYear(world, aiDecide, (m, d) => { log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`); render(); });
+      await stepYear(world, aiDecide, (m, d, fx) => { log(`  ${m.name}: ${d.action === "something_else" ? `${d.deed} → ${fx?.outcome}` : d.action.replace(/_/g, " ")}`); render(); }, aiTranslate);
       if ($("chronicler").checked && (world.year - 214) % 10 === 0) {
         log("The chronicler is writing…");
         const c = await chronicle(world, world.year - 10);
@@ -279,7 +284,7 @@ $("filters").addEventListener("click", (e) => { const b = e.target.closest("butt
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
-const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "diplomacy"]);
+const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "diplomacy", "deed"]);
 function renderChronicle() {
   const el = $("chronicle");
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;

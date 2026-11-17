@@ -38,6 +38,7 @@
   .feed { max-height:300px; overflow:auto; font-size:13px; }
   .feed .ev { padding:3px 0 3px 8px; border-left:3px solid var(--line); margin:3px 0; }
   .feed .ev.revolution, .feed .ev.revolt, .feed .ev.war { border-color:var(--bad); }
+  .feed .ev.deed { border-color:#e0a454; } .feed .ev.death { border-color:#8a8a99; }
   .feed .ev.idea, .feed .ev.rise { border-color:#b48ee0; } .feed .ev.god { border-color:var(--holy); background:#211f12; }
   .feed .ev.summary { border-color:var(--accent); background:#262212; } .feed .ev .sp { display:block; color:var(--muted); font-style:italic; }
   .feed .yr { color:var(--accent); font-weight:700; margin-top:6px; }
@@ -58,7 +59,7 @@
     <div class="legend">
       <span><i style="background:#c9b27a"></i>villager</span><span><i style="background:#e0b354"></i>notable mind</span><span><i style="background:#e6e6ff"></i>prophet</span>
       <span><i style="background:#8f2f2f"></i>soldier</span><span><i style="background:#e0463e"></i>in open defiance</span><span><i style="background:#9fd17a"></i>sick</span><span><i style="background:#fffbe0"></i>believer (dot above head)</span>
-      <span>Flag on Kessa: <b style="color:#c9a227">gold</b> crown · <b style="color:#3d7ab8">blue</b> councils · <b style="color:#c94c4c">red</b> army</span>
+      <span>Flag on Kessa: <b style="color:#c9a227">gold</b> crown · <b style="color:#3d7ab8">blue</b> councils · <b style="color:#c94c4c">red</b> army · <b style="color:#9b6fd6">purple</b> temple · <b style="color:#d9792b">orange</b> usurper</span>
     </div>
     <div class="panel">
       <div class="row">
@@ -194,10 +195,24 @@ async function generateJson(system, user, schema, maxTokens = 260) {
 async function aiDecide(mind, prompt, w) {
   if (useMock()) return mockDecide(mind, prompt, w);
   try {
-    const d = await generateJson(prompt.system, prompt.user, prompt.schema);
-    if (!d || !prompt.actions.includes(d.action)) return mockDecide(mind, prompt, w);
+    const d = await generateJson(prompt.system, prompt.user, prompt.schema, 420);
+    if (!d || !(prompt.actions.includes(d.usual_action) || d.usual_action === "something_else")) return mockDecide(mind, prompt, w);
     return d;
   } catch (e) { log(`  ${mind.name}: AI error, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
+}
+// Turns an unusual deed into building blocks. Returning null makes the simulation use its keyword stand-in.
+async function aiTranslate(mind, prompt, w) {
+  if (useMock()) return null;
+  try { return await generateJson(prompt.system, prompt.user, prompt.schema, 420); }
+  catch (e) { log(`  could not translate ${mind.name}'s deed; using a rough reading.`); return null; }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function onMind(m, d, fx) {
+  if (d.action === "something_else") log(`  ${m.name}: ${d.deed}${fx?.outcome ? ` → ${fx.outcome}` : ""}`);
+  else log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`);
+  renderSide();
+  if (fx) pop.playDeed(fx, world, () => refreshMap());
+  if (useMock()) await sleep(d.action === "something_else" ? 1600 : fx?.effects?.length ? 500 : 120);
 }
 
 // ---------------------------------------------------------------------------
@@ -221,7 +236,7 @@ function frame() {
   pop.draw(lctx, selected?.agentId);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(low, 0, 0, LOW_W * SCALE, LOW_H * SCALE);
-  drawLabels(ctx, SCALE);
+  drawLabels(ctx, SCALE, world);
   pop.drawEffects(ctx, SCALE);
   requestAnimationFrame(frame);
 }
@@ -235,7 +250,7 @@ async function runYears(n) {
     await ensureModel();
     for (let i = 0; i < n && !world.ended && !pauseRequested; i++) {
       log(`Year ${world.year}: the minds are thinking…`);
-      const events = await stepYear(world, aiDecide, (m, d) => { log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`); renderSide(); });
+      const events = await stepYear(world, aiDecide, onMind, aiTranslate);
       if ((world.year - 214) % 10 === 0 && !useMock() && model) await writeChronicle(world.year - 10);
       refreshMap(); pop.onYear(events); renderAll();
     }
@@ -287,6 +302,7 @@ function renderSelected() {
     const idea = s.ideaId ? world.ideas.find((i) => i.id === s.ideaId) : null;
     el.innerHTML = `<div class="card"><div class="name">${esc(s.title)}</div><div class="role">${esc(s.role)}${s.alive ? "" : " · gone"}</div>
       <div style="font-size:13px;margin-top:4px"><b>Drives:</b> ${esc(s.motive)}</div>
+      ${s.lastDeed ? `<div style="font-size:13px;margin-top:4px"><b>Last deed:</b> ${esc(s.lastDeed)}</div>` : ""}
       ${s.lastSpeech ? `<div class="quote">"${esc(s.lastSpeech)}"</div>` : ""}
       ${s.lastReason ? `<div style="font-size:13px"><b>Private thoughts:</b> ${esc(s.lastReason)}</div>` : ""}
       ${idea ? `<div style="font-size:13px"><b>${esc(idea.name)}:</b> <i>"${esc(idea.tenet)}"</i></div>` : ""}
@@ -378,7 +394,7 @@ function renderMindsList() {
   $("mindsList").innerHTML = liveMinds(world).map((m) => `<button class="secondary" data-id="${m.id}">${esc(m.name)}</button>`).join("");
   $("mindsList").querySelectorAll("button").forEach((b) => (b.onclick = () => { const m = world.minds.find((x) => x.id === +b.dataset.id); select("mind", m); const a = pop.agents.get("m" + m.id); if (a) pop.ring(a.x, a.y, "#ffffff"); }));
 }
-const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "god", "diplomacy"]);
+const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "god", "diplomacy", "deed"]);
 function renderFeed() {
   const el = $("feed"); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
   let html = "", y = null;

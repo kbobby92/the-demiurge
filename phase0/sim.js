@@ -2,7 +2,9 @@
 // Pure JavaScript, no browser APIs, so it can be tested in Node with a mock mind.
 //
 // The world owns the rules (weather, the dam, harvests, hunger, fever, legitimacy).
-// Minds only choose actions from a list; every effect is applied here.
+// Minds describe what they do in their own words. Usual deeds map to a known action;
+// anything else is translated into building blocks and judged in deeds.js.
+import { applyDeed, buildTranslatePrompt, mockTranslate, listedFx } from "./deeds.js";
 
 // ---------------------------------------------------------------------------
 // Random numbers (seeded so a run can be repeated)
@@ -85,6 +87,7 @@ export function createWorld(seed = 214) {
     nextMindId: 1,
     ended: false,
     god: { power: 100, max: 100, believers: 0, acts: [] },
+    structures: [], bonds: {},
   };
 
   // Named citizens: 12 per village.
@@ -159,6 +162,7 @@ function rememberAll(w, text, filter = () => true) { for (const m of liveMinds(w
 export function liveMinds(w) { return w.minds.filter((m) => m.alive); }
 function mindByRole(w, role) { return liveMinds(w).find((m) => m.role === role); }
 function ruler(w) { return mindByRole(w, "ruler"); }
+export function rulerOf(w) { return ruler(w); }
 function villageNames(w) { return Object.keys(w.villages); }
 function totalPop(w) { return villageNames(w).reduce((a, v) => a + w.villages[v].pop, 0) + w.kessaPop + w.soldiers; }
 
@@ -235,10 +239,18 @@ export function observationsFor(w, mind) {
     }
   }
   if (mind.creditsGod && mind.godName) obs.push(`You believe ${mind.godName} has spoken to you.`);
+  for (const v of villageNames(w)) {
+    const vil = w.villages[v];
+    if (vil.fieldDamage > 0.05) obs.push(`Much of ${v}'s crop is ${vil.fieldScar === "fire" ? "burned black" : vil.fieldScar === "flood" ? "drowned" : "ruined"}.`);
+    if (vil.poisoned > 0) obs.push(`${v}'s water has been fouled; people there fall sick.`);
+  }
+  for (const st of (w.structures || []).slice(-5)) obs.push(`In ${st.place} stands ${st.name.match(/^[aeiou]/i) ? "an" : "a"} ${st.name}, raised by ${st.builder} in ${st.year}.`);
+  for (const msg of mind.inbox || []) obs.push(`A PRIVATE MESSAGE from ${msg.from} (year ${msg.year}): "${msg.text}"`);
   const active = w.citizens.filter((c) => c.alive && c.active).length;
   if (active > 3 && mind.role !== "foreign") obs.push(`There is open anger in the villages; about ${round(active / w.citizens.filter((c) => c.alive).length * 100)}% of folk speak of defiance.`);
   if (mind.role === "foreign") {
-    obs.length = 0;
+    const keep = obs.filter((o) => o.startsWith("A PRIVATE MESSAGE"));
+    obs.length = 0; obs.push(...keep);
     obs.push(`Oren's harvest was ${r && r.foodRatio < 0.8 ? "poor" : "adequate"}. Oren's army: about ${w.soldiers} spearmen; yours: ${w.varn.army}.`);
     obs.push(`Oren is ruled as ${w.government.name}. Its people's trust in their rulers is ${w.legitimacy > 0.45 ? "holding" : "weak"}.`);
     obs.push(`Your dam is ${w.dam > 0.7 ? "nearly closed" : w.dam > 0.35 ? "half closed" : "mostly open"}. The greenstone mines are held by ${w.mines === "varn" ? "Varn" : "Oren"}.`);
@@ -276,21 +288,24 @@ What you remember:
 ${mind.memories.map((m) => "- " + m).join("\n")}
 What you see and hear this year:
 ${observationsFor(w, mind).map((o) => "- " + o).join("\n")}
+Other notable people: ${liveMinds(w).filter((m) => m !== mind).map((m) => `${m.name} (${m.role === "foreign" ? "ruler of Varn" : m.role}, ${m.place})`).join("; ")}.
 
-TASK: Decide what you do this year. Choose exactly one action: ${actions.join(", ")}.
+TASK: Decide what you do this year. You may attempt ANYTHING a person in your place could really try: act openly or in secret, alone or with others, kindly or cruelly. Describe it in "deed" in your own words: what you do, where, to whom, and how (1-2 sentences). The world decides whether it works.
+Usual choices for someone like you: ${actions.join(", ")}. If your deed is one of these, name it in "usual_action"; if it is anything else, put "something_else".
 Also say what you believe causes the drought and what causes the fever (from: ${CAUSES.join(", ")}). If you have formed a NEW idea about how the valley should live or be ruled, or what the gods want, state it in one sentence of your own words in new_idea; otherwise leave it empty.
-Reply with JSON: {"action", "reason" (your private reasoning, 1-2 sentences), "speech" (what you say aloud, 1-2 sentences, in your own voice), "drought_cause", "fever_cause", "new_idea"}`;
+Reply with JSON: {"reason" (your private reasoning, 1-2 sentences), "deed", "usual_action", "speech" (what you say aloud, 1-2 sentences, in your own voice), "drought_cause", "fever_cause", "new_idea"}`;
   const schema = {
     type: "object",
     properties: {
-      action: { enum: actions },
       reason: { type: "string", maxLength: 300 },
+      deed: { type: "string", maxLength: 300 },
+      usual_action: { enum: [...actions, "something_else"] },
       speech: { type: "string", maxLength: 300 },
       drought_cause: { enum: CAUSES },
       fever_cause: { enum: CAUSES },
       new_idea: { type: "string", maxLength: 200 },
     },
-    required: ["action", "reason", "speech", "drought_cause", "fever_cause", "new_idea"],
+    required: ["reason", "deed", "usual_action", "speech", "drought_cause", "fever_cause", "new_idea"],
     additionalProperties: false,
   };
   return { system: SYSTEM_TEXT, user, schema, actions };
@@ -304,12 +319,7 @@ function worstFeverVillage(w) {
     .sort((a, b) => w.villages[b].feverDeaths - w.villages[a].feverDeaths)[0];
 }
 
-function applyDecision(w, mind, d) {
-  const a = d.action;
-  const say = (text) => chron(w, "act", text, mind.name);
-  const V = w.villages;
-  mind.lastAction = a; mind.lastSpeech = d.speech || ""; mind.lastReason = d.reason || "";
-
+function applyThoughts(w, mind, d) {
   // Beliefs about causes, and what they mean for discovery.
   mind.pendingBeliefs = mind.pendingBeliefs || {};
   for (const [k, field] of [["drought", "drought_cause"], ["fever", "fever_cause"]]) {
@@ -325,6 +335,13 @@ function applyDecision(w, mind, d) {
     if (before && before !== mind.beliefs[k] && (mind.beliefs[k] === truth || before === truth)) chron(w, "belief", `${mind.name} came to believe the ${k} is caused by ${String(mind.beliefs[k]).replace(/_/g, " ")} (no longer ${String(before).replace(/_/g, " ")}).`, mind.name);
   }
   if (d.new_idea) createOrUpdateIdea(w, mind, d.new_idea);
+}
+
+function applyDecision(w, mind, d) {
+  const a = d.action;
+  const say = (text) => chron(w, "act", text, mind.name);
+  const V = w.villages;
+  mind.lastAction = a; mind.lastSpeech = d.speech || ""; mind.lastReason = d.reason || ""; mind.lastDeed = d.deed || "";
 
   switch (a) {
     // --- ruler ---
@@ -419,7 +436,7 @@ function applyDecision(w, mind, d) {
   w.legitimacy = clamp(w.legitimacy); w.loyalty = clamp(w.loyalty);
 }
 
-function arrestMind(w, m, how) {
+export function arrestMind(w, m, how) {
   m.alive = false; m.fate = `executed in ${w.year} (${how})`;
   chron(w, "death", `${m.name} was ${how} and executed at Kessa.`, m.name);
   if (w.villages[m.place]) w.villages[m.place].martyr = 4;
@@ -428,7 +445,7 @@ function arrestMind(w, m, how) {
   succeed(w, m);
 }
 
-function succeed(w, fallen) {
+export function succeed(w, fallen) {
   // A follower of the fallen leader's idea may rise to carry it on.
   if (!fallen.ideaId) return;
   const cand = w.citizens.filter((c) => c.alive && !c.promoted && (c.idea === fallen.ideaId || c.faith === fallen.ideaId) && !c.jailed).sort((a, b) => b.grief - a.grief)[0];
@@ -450,7 +467,7 @@ function generalCoup(w, gen) {
   }
 }
 
-function bereave(w, c, amount) { for (const o of w.citizens) if (o.alive && o.family === c.family) o.grief = clamp(o.grief + amount); }
+export function bereave(w, c, amount) { for (const o of w.citizens) if (o.alive && o.family === c.family) o.grief = clamp(o.grief + amount); }
 
 export function promote(w, c, why, ideaId = null) {
   if (liveMinds(w).length >= 10 || c.age > 66) return null;
@@ -488,7 +505,9 @@ function updateWorld(w) {
     const vil = V[v];
     const waterFactor = vil.water === "spring" ? clamp(0.7 + 0.3 * w.rain, 0.5, 1.2) : clamp(flow, 0.2, 1.2);
     const wellsLabor = vil.wellsYear === w.year ? 0.95 : 1;
-    const harvest = vil.pop * 0.55 * 2.4 * waterFactor * wellsLabor;
+    const harvest = vil.pop * 0.55 * 2.4 * waterFactor * wellsLabor * (1 - (vil.fieldDamage || 0)) * (1 + (vil.fieldBoost || 0));
+    vil.fieldDamage = (vil.fieldDamage || 0) * 0.4; if (vil.fieldDamage < 0.05) { vil.fieldDamage = 0; vil.fieldScar = null; }
+    vil.fieldBoost = 0;
     const taxRate = vil.hidden ? w.tax * 0.5 : w.tax;
     const tax = harvest * taxRate; taxed += tax;
     let available = harvest - tax + vil.stock + Math.max(-vil.stock, vil.aid);
@@ -500,6 +519,7 @@ function updateWorld(w) {
     // Fever: the hidden cause is low, still river water. Wells and spring water are safe.
     let sickRate = vil.water === "spring" ? 0.004 : Math.max(0, 0.8 - flow) * 0.2 + (vil.downstream ? 0.03 : 0);
     if (vil.wells) sickRate *= 0.1;
+    if (vil.poisoned > 0) { sickRate += 0.04 + 0.12 * (vil.poisonStrength || 0.2); vil.poisoned--; }
     if (ratio < 0.8) sickRate *= 1.3;
     vil.sick = round(vil.pop * sickRate);
     vil.feverDeaths = round(vil.sick * (w.flags.careThisYear ? 0.22 : 0.3));
@@ -565,6 +585,7 @@ function updateWorld(w) {
         if (kind === "faith" && w.flags.templeCharity) p += 0.1;
         if (idea.creditsGod && w.flags.preachingGod) p += 0.1;
         if (idea.creditsGod && c.creditsGod) p += 0.3;
+        if ((w.structures || []).some((st) => st.ideaId === idea.id && st.place === c.village)) p += 0.08;
         if (!local && !(w.flags.speaking || []).length) p *= 0.4;
         if (kind === "politics") p += w.flags.rebelBoost;
         if (p > bestP) { bestP = p; best = idea; }
@@ -730,8 +751,10 @@ function succession(w, dead) {
 // ---------------------------------------------------------------------------
 // One year
 // ---------------------------------------------------------------------------
-// decide(mind, prompt) must return { action, reason, speech, drought_cause, fever_cause, new_idea }.
-export async function stepYear(w, decide, onMind) {
+// decide(mind, prompt) returns { reason, deed, usual_action, speech, drought_cause, fever_cause, new_idea }.
+// translate(mind, prompt) turns an unusual deed into building blocks (see deeds.js); optional.
+// onMind(mind, decision, fx) is told what happened, including what the map should show.
+export async function stepYear(w, decide, onMind, translate) {
   w.yearEvents = [];
   w.flags = { rebelBoost: 0, ritualThisYear: false, careThisYear: false, publicSpeakers: w.flags.publicSpeakers || new Set(), uprisingCalls: [] };
   const minds = liveMinds(w).slice().sort((a, b) => order(a) - order(b));
@@ -741,12 +764,28 @@ export async function stepYear(w, decide, onMind) {
     const prompt = buildPrompt(w, m);
     let d;
     try { d = await decide(m, prompt, w); }
-    catch (e) { d = { action: prompt.actions.at(-1), reason: "(no decision: " + (e.message || e) + ")", speech: "", drought_cause: "unknown", fever_cause: "unknown", new_idea: "" }; }
-    if (!prompt.actions.includes(d.action)) d.action = prompt.actions.at(-1);
-    applyDecision(w, m, d);
+    catch (e) { d = { usual_action: prompt.actions.at(-1), deed: "", reason: "(no decision: " + (e.message || e) + ")", speech: "", drought_cause: "unknown", fever_cause: "unknown", new_idea: "" }; }
+    m.inbox = [];
+    let act = d.usual_action ?? d.action;
+    const freeform = act === "something_else" && String(d.deed || "").trim().length > 8;
+    applyThoughts(w, m, d);
+    let fx;
+    if (freeform) {
+      let t = null;
+      if (translate) { try { t = await translate(m, buildTranslatePrompt(w, m, d), w); } catch { t = null; } }
+      if (!t) t = mockTranslate(w, m, d.deed);
+      d.action = "something_else"; d.translation = t;
+      fx = applyDeed(w, m, d, t);
+    } else {
+      if (!prompt.actions.includes(act)) act = prompt.actions.at(-1);
+      d.action = act;
+      applyDecision(w, m, d);
+      remember(m, `You chose to ${act.replace(/_/g, " ")}. ${d.reason || ""}`.trim());
+      fx = listedFx(w, m, act, w.yearEvents.at(-1)?.who === m.name ? w.yearEvents.at(-1).text : "");
+    }
+    w.legitimacy = clamp(w.legitimacy); w.loyalty = clamp(w.loyalty);
     const last = w.yearEvents.at(-1); if (d.speech && last && last.who === m.name) last.speech = d.speech;
-    remember(m, `You chose to ${d.action.replace(/_/g, " ")}. ${d.reason || ""}`.trim());
-    onMind?.(m, d);
+    await onMind?.(m, d, fx);
   }
   const { flow } = updateWorld(w);
   const alive = w.citizens.filter((c) => c.alive);
@@ -786,5 +825,18 @@ export function mockDecide(m, prompt, w) {
   const feverGuess = r && rng.chance(0.15) ? "bad_water" : rng.pick(["the_gods", "the_moons", "the_ruler", "witchcraft", "bad_water"]);
   const idea = (m.role === "organizer" || m.role === "priest") && !m.ideaId && rng.chance(0.4)
     ? (m.role === "priest" ? "The red moon demands that the valley obey the temple before any king." : "Each village should choose its own elders and decide its own taxes.") : "";
-  return Promise.resolve({ action, reason: "(mock reasoning)", speech: "(mock speech)", drought_cause: rng.pick(["the_gods", "the_moons", "varn_dam", "the_ruler"]), fever_cause: m.beliefs.fever === "bad_water" ? "bad_water" : feverGuess, new_idea: idea });
+  const deeds = {
+    ruler: ["Send soldiers to burn the fields of whichever village shelters the rebels", "Build a great watchtower at Kessa to show my strength", "Secretly bribe the general with gold to keep the army loyal"],
+    general: ["Quietly tell the captains in Kessa that the army deserves better rulers", "Gather loyal spearmen and march to Low Ford to keep order"],
+    priest: ["Build a shrine to the red moon in Reedmere", "Preach in Low Ford that the moons punish the proud"],
+    prophet: ["Preach the god's word in Hollowmere and build a shrine there"],
+    organizer: ["At night, lead my neighbors to burn the royal granary at Kessa", "Travel to Reedmere and rally the farmers to our cause", "Poison the soldiers' well at Kessa in secret", "Spread rumours in the villages that the king is cursed"],
+    merchant: ["Secretly bribe the general to look away from my smuggling", "Give grain to the hungry of Low Ford to win their favor"],
+    foreign: ["Send raiders to burn the fields of Low Ford", "Send word to the king of Oren that Varn would make peace for grain"],
+  }[m.role];
+  if (deeds && rng.chance(0.3)) {
+    const deed = rng.pick(deeds);
+    return Promise.resolve({ usual_action: "something_else", deed, action: "something_else", reason: "(mock reasoning)", speech: "(mock speech)", drought_cause: rng.pick(["the_gods", "the_moons", "varn_dam", "the_ruler"]), fever_cause: m.beliefs.fever === "bad_water" ? "bad_water" : feverGuess, new_idea: idea });
+  }
+  return Promise.resolve({ usual_action: action, deed: `(mock) ${action.replace(/_/g, " ")}`, action, reason: "(mock reasoning)", speech: "(mock speech)", drought_cause: rng.pick(["the_gods", "the_moons", "varn_dam", "the_ruler"]), fever_cause: m.beliefs.fever === "bad_water" ? "bad_water" : feverGuess, new_idea: idea });
 }

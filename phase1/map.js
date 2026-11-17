@@ -50,6 +50,19 @@ export function drawTerrain(ctx, w) {
       ctx.fillStyle = (xx / 4 + yy / 3) % 2 ? crop : shade(crop, -18); ctx.fillRect(f.x + xx, f.y + yy, 3, 2);
     }
   }
+  // Scars on the fields: burned, flooded or ruined crops.
+  for (const name of ["Hollowmere", "Reedmere", "Low Ford"]) {
+    const v = w.villages[name], f = PLACES[name].field;
+    if (!(v.fieldDamage > 0.04)) continue;
+    const r4 = mulberry(name.length * 7 + w.year);
+    const col = v.fieldScar === "fire" ? ["#2a2420", "#3b3029", "#4a3a2e"] : v.fieldScar === "flood" ? ["#3b6f8f", "#4c86a8", "#36607a"] : ["#5b5636", "#4f4a2e", "#6a603c"];
+    for (let yy = 0; yy < f.h; yy += 1) for (let xx = 0; xx < f.w; xx += 1) if (r4() < v.fieldDamage) { ctx.fillStyle = col[(xx + yy) % 3]; ctx.fillRect(f.x + xx, f.y + yy, 1, 1); }
+  }
+  // Fouled water.
+  for (const name of ["Hollowmere", "Reedmere", "Low Ford"]) {
+    const v = w.villages[name], wp = PLACES[name].water;
+    if (v.poisoned > 0) { ctx.fillStyle = "#7fae3a"; ctx.fillRect(wp.x - 3, wp.y - 2, 7, 4); ctx.fillStyle = "#a8d04a"; ctx.fillRect(wp.x - 1, wp.y - 1, 2, 1); }
+  }
   // Houses: one per ~25 people.
   for (const name of ["Hollowmere", "Reedmere", "Low Ford"]) {
     const v = w.villages[name], p = PLACES[name], r3 = mulberry(name.length * 31);
@@ -68,8 +81,30 @@ export function drawTerrain(ctx, w) {
   ctx.fillStyle = "#7d7d86"; ctx.fillRect(k.x - 16, k.y - 12, 32, 24);
   ctx.fillStyle = "#5e5e68"; ctx.fillRect(k.x - 14, k.y - 10, 28, 20);
   ctx.fillStyle = "#9b9ba6"; ctx.fillRect(k.x - 5, k.y - 16, 10, 12);
-  ctx.fillStyle = w.government.type === "monarchy" ? "#c9a227" : w.government.type === "military" ? "#8a2b2b" : "#3d7ab8"; ctx.fillRect(k.x - 1, k.y - 22, 1, 6); ctx.fillRect(k.x, k.y - 22, 4, 3);
+  ctx.fillStyle = FLAG[w.government.type] || "#3d7ab8"; ctx.fillRect(k.x - 1, k.y - 22, 1, 6); ctx.fillRect(k.x, k.y - 22, 4, 3);
   ctx.fillStyle = "#d8d0b8"; ctx.fillRect(k.x + 8, k.y + 2, 6, 6); ctx.fillStyle = "#b48ee0"; ctx.fillRect(k.x + 10, k.y, 2, 2);
+  // Things the inhabitants have built.
+  for (const st of w.structures || []) drawStructure(ctx, st, structurePos(w, st));
+}
+
+export const FLAG = { monarchy: "#c9a227", military: "#8a2b2b", council: "#3d7ab8", theocracy: "#9b6fd6", usurper: "#d9792b", conquest: "#555b66" };
+
+export function structurePos(w, st) {
+  const same = (w.structures || []).filter((x) => x.place === st.place);
+  const i = same.indexOf(st);
+  const p = PLACES[st.place] || PLACES.Kessa;
+  const spots = st.place === "Kessa" ? [[-26, 6], [24, -6], [-22, -14], [22, 14]] : [[24, -10], [-26, 8], [20, 14], [-22, -12]];
+  const [dx, dy] = spots[i % spots.length];
+  return { x: p.x + dx, y: p.y + dy };
+}
+function drawStructure(ctx, st, { x, y }) {
+  const n = st.name.toLowerCase(), big = Math.min(3, st.size || 1);
+  const h = 5 + big * 2;
+  if (/tower|watch/.test(n)) { ctx.fillStyle = "#8c8c96"; ctx.fillRect(x - 2, y - h - 4, 5, h + 4); ctx.fillStyle = "#b5b5c0"; ctx.fillRect(x - 3, y - h - 6, 7, 2); return; }
+  if (/wall|fort|palisade/.test(n)) { ctx.fillStyle = "#7f6a4d"; ctx.fillRect(x - 8, y - 3, 16, 3); for (let i = -8; i < 8; i += 3) ctx.fillRect(x + i, y - 5, 2, 2); return; }
+  if (/shrine|temple|altar|statue|monument|idol/.test(n)) { ctx.fillStyle = "#d8d0b8"; ctx.fillRect(x - 3, y - h, 6, h); ctx.fillStyle = "#b48ee0"; ctx.fillRect(x - 1, y - h - 2, 2, 2); return; }
+  if (/granary|store|barn/.test(n)) { ctx.fillStyle = "#a0763f"; ctx.fillRect(x - 4, y - 5, 8, 5); ctx.fillStyle = "#c8b44a"; ctx.fillRect(x - 3, y - 7, 6, 2); return; }
+  ctx.fillStyle = "#9c7a54"; ctx.fillRect(x - 4, y - 4 - big, 8, 4 + big); ctx.fillStyle = "#6e4f33"; ctx.fillRect(x - 5, y - 6 - big, 10, 2);
 }
 
 function blob(ctx, cx, cy, rx, ry, color, seed) {
@@ -83,7 +118,7 @@ function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = 
 // Agents
 // ---------------------------------------------------------------------------
 export class Population {
-  constructor() { this.agents = new Map(); this.effects = []; this.march = null; }
+  constructor() { this.agents = new Map(); this.effects = []; this.march = null; this.particles = []; this.emitters = []; this.carts = []; }
 
   sync(w) {
     const keep = new Set();
@@ -101,7 +136,7 @@ export class Population {
       const id = "m" + m.id;
       if (!m.alive || m.role === "foreign") continue;
       keep.add(id);
-      const place = ["ruler", "general", "priest"].includes(m.role) ? "Kessa" : (PLACES[m.place] ? m.place : "Kessa");
+      const place = PLACES[m.place] ? m.place : "Kessa";
       if (!this.agents.has(id)) this.agents.set(id, this.newAgent(id, "mind", place, homeOf(place)));
       const a = this.agents.get(id); a.ref = m; a.village = place; a.home = homeOf(place);
     }
@@ -113,7 +148,8 @@ export class Population {
     // Soldiers: one sprite per ~6 spearmen.
     const nSold = Math.round(w.soldiers / 6);
     for (let i = 0; i < nSold; i++) { const id = `s-${i}`; keep.add(id); if (!this.agents.has(id)) this.agents.set(id, this.newAgent(id, "soldier", "Kessa", PLACES.Kessa)); }
-    for (const id of [...this.agents.keys()]) if (!keep.has(id)) this.agents.delete(id);
+    const now = performance.now();
+    for (const [id, a] of [...this.agents]) if (!keep.has(id) && !(a.kind === "visitor" && a.expires > now)) this.agents.delete(id);
     // Sickness tint per village.
     for (const a of this.agents.values()) {
       const v = w.villages[a.village];
@@ -146,15 +182,31 @@ export class Population {
 
   step() {
     const now = performance.now();
+    this.stepParticles();
     if (this.march && now > this.march.until) this.march = null;
+    for (const [id, a] of this.agents) if (a.kind === "visitor" && now > a.expires) this.agents.delete(id);
     for (const a of this.agents.values()) {
+      if (a.goal && now > a.goal.until) { a.goal = null; a.tx = null; if (a.kind === "visitor") { a.goal = { x: VARN.x, y: VARN.y, jx: 0, jy: 0, until: a.expires }; } }
+      if (a.goal) { const g = a.goal.follow ? this.agents.get(a.goal.follow) : null; a.tx = (g ? g.x : a.goal.x) + a.goal.jx; a.ty = (g ? g.y : a.goal.y) + a.goal.jy; a.wait = 0; }
       if (a.wait > 0) { a.wait--; continue; }
       if (a.tx === null) this.pickTarget(a);
       const dx = a.tx - a.x, dy = a.ty - a.y, d = Math.hypot(dx, dy);
-      const sp = a.speed * (this.march && (a.rebel || a.kind === "soldier") ? 2.2 : 1);
-      if (d < 1) { a.tx = null; a.wait = rand(30, 200); }
+      const sp = a.goal ? 0.85 : a.speed * (this.march && (a.rebel || a.kind === "soldier") ? 2.2 : 1);
+      if (d < 1) { if (!a.goal) { a.tx = null; a.wait = rand(30, 200); } }
       else { a.x += (dx / d) * sp; a.y += (dy / d) * sp; }
     }
+  }
+
+  stepParticles() {
+    const now = performance.now();
+    this.emitters = this.emitters.filter((e) => now < e.until);
+    for (const e of this.emitters) for (let i = 0; i < e.rate; i++) this.particles.push(spawn(e));
+    for (const p of this.particles) { p.x += p.vx; p.y += p.vy; p.vy += p.g || 0; p.life--; }
+    this.particles = this.particles.filter((p) => p.life > 0);
+    if (this.particles.length > 1500) this.particles.splice(0, this.particles.length - 1500);
+    for (const c of this.carts) { const dx = c.tx - c.x, dy = c.ty - c.y, d = Math.hypot(dx, dy); if (d < 1) c.done = true; else { c.x += (dx / d) * 0.5; c.y += (dy / d) * 0.5; } }
+    for (const c of this.carts) if (c.done && !c.landed) { c.landed = true; this.label(c.label || "+grain", c.tx, c.ty - 8, "#f1d77a"); }
+    this.carts = this.carts.filter((c) => !c.done);
   }
 
   pickTarget(a) {
@@ -182,28 +234,175 @@ export class Population {
       ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(x - 1, y + 2, 3, 1);
       let body = a.shirt;
       if (a.kind === "soldier") body = "#8f2f2f";
+      if (a.kind === "visitor") body = "#34508f";
       if (a.kind === "mind") body = a.ref?.role === "prophet" ? "#e6e6ff" : a.ref?.role === "priest" ? "#b48ee0" : "#e0b354";
       if (a.rebel) body = "#e0463e";
       ctx.fillStyle = body; ctx.fillRect(x - 1, y - 1, 2, 3);
       ctx.fillStyle = a.sick ? "#9fd17a" : "#e6c29a"; ctx.fillRect(x - 1, y - 3, 2, 2);
-      if (a.kind === "soldier") { ctx.fillStyle = "#cfcfcf"; ctx.fillRect(x + 1, y - 5, 1, 6); }
+      if (a.kind === "soldier" || a.kind === "visitor") { ctx.fillStyle = "#cfcfcf"; ctx.fillRect(x + 1, y - 5, 1, 6); }
       if (a.kind === "mind") { ctx.fillStyle = "#fff2b3"; ctx.fillRect(x - 1, y - 4, 2, 1); }
       if (a.believer) { ctx.fillStyle = "rgba(255,255,220,.7)"; ctx.fillRect(x, y - 5, 1, 1); }
       if (a.id === selectedId) { ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, y - 5.5, 7, 10); }
     }
+    for (const c of this.carts) { const x = Math.round(c.x), y = Math.round(c.y); ctx.fillStyle = "#6e4f33"; ctx.fillRect(x - 2, y - 1, 5, 2); ctx.fillStyle = c.color || "#e6c75a"; ctx.fillRect(x - 1, y - 3, 3, 2); ctx.fillStyle = "#2a1f14"; ctx.fillRect(x - 2, y + 1, 1, 1); ctx.fillRect(x + 2, y + 1, 1, 1); }
+    for (const p of this.particles) { ctx.globalAlpha = Math.min(1, p.life / 20); ctx.fillStyle = p.color; ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size || 1, p.size || 1); }
+    ctx.globalAlpha = 1;
   }
 
   drawEffects(ctx, scale) {
     const now = performance.now();
     this.effects = this.effects.filter((e) => now - e.born < e.life);
     for (const e of this.effects) {
+      if (now < e.born) continue;
       const t = (now - e.born) / e.life;
       ctx.globalAlpha = 1 - t;
-      if (e.ring) { ctx.strokeStyle = e.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x * scale, e.y * scale, 6 + t * 40, 0, Math.PI * 2); ctx.stroke(); }
+      if (e.ring) { ctx.strokeStyle = e.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(e.x * scale, e.y * scale, (e.r0 ?? 6) + t * (e.grow ?? 40), 0, Math.PI * 2); ctx.stroke(); }
+      else if (e.link) {
+        const a = this.agents.get(e.a), b = this.agents.get(e.b); const A = a || e.pa, B = b || e.pb; if (!A || !B) { ctx.globalAlpha = 1; continue; }
+        ctx.globalAlpha = (1 - t) * (0.6 + 0.4 * Math.sin(now / 120)); ctx.strokeStyle = e.color; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(A.x * scale, (A.y - 2) * scale); ctx.lineTo(B.x * scale, (B.y - 2) * scale); ctx.stroke(); ctx.setLineDash([]);
+      }
+      else if (e.bubble) {
+        const a = this.agents.get(e.agent); const x = (a ? a.x : e.x) * scale, y = ((a ? a.y : e.y) - 9) * scale;
+        ctx.globalAlpha = t > 0.85 ? (1 - t) / 0.15 : 1; ctx.font = "12px system-ui, sans-serif"; ctx.textAlign = "center";
+        const lines = wrap(e.text, 34).slice(0, 3), wd = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 12, ht = lines.length * 14 + 8;
+        ctx.fillStyle = "rgba(250,246,232,.94)"; roundRect(ctx, x - wd / 2, y - ht - 6, wd, ht, 6); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x - 4, y - 7); ctx.lineTo(x + 4, y - 7); ctx.lineTo(x, y); ctx.fill();
+        ctx.fillStyle = "#2b2618"; lines.forEach((l, i) => ctx.fillText(l, x, y - ht - 6 + 16 + i * 14));
+      }
       else { ctx.font = "bold 13px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillText(e.text, e.x * scale + 1, (e.y - t * 12) * scale + 1); ctx.fillStyle = e.color; ctx.fillText(e.text, e.x * scale, (e.y - t * 12) * scale); }
       ctx.globalAlpha = 1;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Deeds: each building block has one animation.
+  // fx = { actorId, actorRole, speech, outcome, scale, effects: [{ block, look, place, from, personId, resource, ok, up, ideaId, thing, soldiers }] }
+  // onLanded is called when the deed's effect appears, so the terrain can be redrawn then.
+  // ---------------------------------------------------------------------------
+  playDeed(fx, w, onLanded) {
+    const actor = this.agents.get("m" + fx.actorId);
+    const start = actor ? { x: actor.x, y: actor.y } : fx.actorRole === "foreign" ? VARN : PLACES.Kessa;
+    if (fx.speech && actor && !/^\(mock/.test(fx.speech)) this.bubble("m" + fx.actorId, fx.speech);
+    if (fx.outcome === "impossible") { if (actor) this.label("…it cannot be done", actor.x, actor.y - 14, "#b9b9c9"); return 0; }
+    const e = fx.effects[0];
+    if (!e) return 0;
+    const crewN = { small: 3, medium: 7, large: 14 }[fx.scale] || 6;
+    const target = this.targetPoint(e, w, start);
+    const from = e.from ? pointOf(e.from) : start;
+    const moving = ["change_resource", "fight", "move_people", "take_power", "recruit"].includes(e.block) || e.soldiers;
+    // Who walks: the actor plus a crew (soldiers for rulers and generals).
+    let crew = moving ? this.pickCrew(fx, e, from, crewN) : [];
+    if (moving && fx.actorRole === "foreign") crew = this.spawnVisitors(crewN, from);
+    const travelMs = moving ? Math.min(5500, Math.max(900, (Math.hypot(target.x - from.x, target.y - from.y) / 0.85) * 16.7)) : 400;
+    const holdMs = travelMs + 7000;
+    const goal = (a, p, spread) => { a.goal = { x: p.x, y: p.y, jx: rand(-spread, spread), jy: rand(-spread * 0.6, spread * 0.6), until: performance.now() + holdMs }; };
+    if (actor && (moving || e.block === "speak_to" || e.block === "relationship")) {
+      if (e.personId != null && (e.block === "speak_to" || e.block === "relationship")) actor.goal = { follow: "m" + e.personId, jx: 4, jy: 0, until: performance.now() + 7000 };
+      else goal(actor, target, 3);
+    }
+    for (const a of crew) goal(a, target, 9);
+    if (e.block === "fight" && e.personId == null && (target === PLACES.Kessa || e.place === "Kessa")) for (const s of this.soldiersNear(PLACES.Kessa, crewN)) goal(s, target, 8);
+    // The visual itself, once they arrive.
+    setTimeout(() => { for (const ef of fx.effects) this.effectVisual(ef, fx, w, this.targetPoint(ef, w, start)); onLanded?.(); }, travelMs);
+    return travelMs + 3000;
+  }
+
+  targetPoint(e, w, start) {
+    if (e.personId != null && ["fight", "speak_to", "relationship", "shift_opinion", "give_power"].includes(e.block)) { const t = this.agents.get("m" + e.personId); if (t) return { x: t.x, y: t.y }; }
+    const p = e.place;
+    if (p === "Varn") return VARN;
+    if (!PLACES[p]) return start;
+    const pl = PLACES[p];
+    if (e.block === "change_resource" && e.resource === "fields" && pl.field) return { x: pl.field.x + pl.field.w / 2, y: pl.field.y + pl.field.h / 2 };
+    if (e.block === "change_resource" && (e.resource === "water" || e.resource === "wells") && pl.water) return { x: pl.water.x, y: pl.water.y + 4 };
+    if (e.block === "change_resource" && e.resource === "buildings" && e.up && w) { const st = [...(w.structures || [])].reverse().find((x) => x.place === p); if (st) { const q = structurePos(w, st); return { x: q.x, y: q.y + 3 }; } }
+    return { x: pl.x, y: pl.y + 4 };
+  }
+
+  pickCrew(fx, e, from, n) {
+    const pool = [...this.agents.values()].filter((a) => !a.goal);
+    if (e.soldiers || fx.actorRole === "ruler" || fx.actorRole === "general") return this.soldiersNear(from, n);
+    const near = pool.filter((a) => (a.kind === "citizen" || a.kind === "anon") && Math.hypot(a.x - from.x, a.y - from.y) < 50);
+    near.sort((a, b) => score(b, e) - score(a, e));
+    return near.slice(0, n);
+  }
+  spawnVisitors(n, from) {
+    const out = [], now = performance.now();
+    for (let i = 0; i < n; i++) { const id = `v-${now}-${i}`; const a = this.newAgent(id, "visitor", "Varn", VARN); a.x = from.x + rand(-4, 4); a.y = from.y + rand(-10, 10); a.expires = now + 26000; this.agents.set(id, a); out.push(a); }
+    return out;
+  }
+  soldiersNear(p, n) { return [...this.agents.values()].filter((a) => a.kind === "soldier" && !a.goal).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y)).slice(0, n); }
+
+  effectVisual(e, fx, w, at) {
+    const ok = e.ok !== false && fx.outcome !== "failure";
+    const now = performance.now();
+    const area = (r) => ({ x: at.x - r, y: at.y - r * 0.6, w: r * 2, h: r * 1.2 });
+    if (!ok) {
+      this.emit("sparks", area(5), 900, 2);
+      this.label(fx.outcome === "failure" ? "Failed" : "…", at.x, at.y - 12, "#c9c9d6");
+      return;
+    }
+    const look = e.look || "other";
+    switch (e.block) {
+      case "change_resource": {
+        const field = e.resource === "fields" && PLACES[e.place]?.field;
+        const zone = field ? { ...field } : area(8);
+        if (!e.up && (look === "fire" || e.resource === "granary" && look !== "theft")) { this.emit("fire", zone, 9000, field ? 6 : 3); this.emit("smoke", zone, 11000, 2); this.label(field ? "Fields burning!" : "Fire!", at.x, at.y - 16, "#ff9a5a"); }
+        else if (look === "poison" || (!e.up && e.resource === "water")) { this.emit("poison", area(5), 7000, 2); this.label("Water fouled", at.x, at.y - 12, "#a8d04a"); }
+        else if (look === "flood") { this.emit("flood", zone, 7000, 5); this.label("Flood!", at.x, at.y - 14, "#8fd0ff"); }
+        else if (e.up && (look === "build" || e.resource === "buildings" || e.resource === "wells")) { this.emit("build", area(4), 5000, 2); this.label(e.thing ? `+ ${e.thing}` : e.resource === "wells" ? "New wells" : "Built", at.x, at.y - 14, "#e9dfc3"); }
+        else if (!e.up && (look === "destroy" || look === "violence" || e.resource === "buildings")) { this.emit("sparks", area(7), 2500, 4); this.emit("smoke", area(6), 6000, 1); this.label(e.place === "Varn" ? "The dam is struck!" : "Destroyed", at.x, at.y - 14, "#ff8a7a"); }
+        else if (!e.up && e.resource === "people") { this.emit("sparks", area(8), 3000, 4); this.label("Bloodshed", at.x, at.y - 14, "#ff8a7a"); }
+        else if (look === "ritual" || (e.up && e.resource === "people")) { for (let i = 0; i < 4; i++) this.effects.push({ ring: true, x: at.x + rand(-10, 10), y: at.y + rand(-6, 6), color: "#f6f2d0", born: now + i * 400, life: 2200, r0: 2, grow: 18 }); }
+        else this.emit(e.up ? "cheer" : "jeer", area(10), 3000, 2);
+        break;
+      }
+      case "fight": {
+        this.emit("sparks", area(9), 3500, 5);
+        if (e.personId != null) { const t = this.agents.get("m" + e.personId); if (t) this.effects.push({ ring: true, x: t.x, y: t.y, color: "#ff4a3a", born: now, life: 1600, r0: 2, grow: 14 }); }
+        this.label(e.place === "Varn" ? "WAR WITH VARN" : e.personId != null ? "An attack!" : "Fighting!", at.x, at.y - 16, "#ff8a7a");
+        break;
+      }
+      case "move_people": this.label(e.place === "Varn" ? "Over the ridge" : `To ${e.place}`, at.x, at.y - 12, "#e9dfc3"); break;
+      case "recruit": case "spread_idea": {
+        const color = e.ideaId ? ideaColor(e.ideaId) : look === "ritual" ? "#f6f2d0" : "#c9a7ff";
+        const near = [...this.agents.values()].filter((a) => (a.kind === "citizen" || a.kind === "anon") && Math.hypot(a.x - at.x, a.y - at.y) < 40);
+        for (let i = 0; i < Math.min(12, near.length); i++) { const a = near[Math.floor(rng() * near.length)]; this.effects.push({ ring: true, x: a.x, y: a.y - 1, color, born: now + i * 260, life: 1800, r0: 1, grow: 9 }); }
+        if (e.block === "recruit") this.label(e.soldiers || fx.actorRole === "ruler" || fx.actorRole === "general" ? "Spearmen raised" : "Followers gather", at.x, at.y - 16, color);
+        break;
+      }
+      case "suppress_idea": {
+        const near = [...this.agents.values()].filter((a) => (a.kind === "citizen" || a.kind === "anon") && Math.hypot(a.x - at.x, a.y - at.y) < 40);
+        for (let i = 0; i < Math.min(10, near.length); i++) { const a = near[Math.floor(rng() * near.length)]; this.effects.push({ ring: true, x: a.x, y: a.y - 1, color: "#6c6c78", born: now + i * 260, life: 1600, r0: 9, grow: -8 }); }
+        this.label("Banned", at.x, at.y - 14, "#b9b9c9");
+        break;
+      }
+      case "shift_opinion": this.emit(e.up ? "cheer" : "jeer", area(14), 3500, 3); break;
+      case "relationship": {
+        const color = { ally: "#f1d77a", love: "#ff9ec4", bribe: "#d8dde6", betray: "#ff4a3a", fear: "#c06cff", gift: "#f1d77a" }[look] || (e.up ? "#f1d77a" : "#ff4a3a");
+        this.effects.push({ link: true, a: "m" + fx.actorId, b: "m" + e.personId, color, born: now, life: 6000 });
+        break;
+      }
+      case "take_power": case "give_power": {
+        const k = PLACES.Kessa;
+        for (let i = 0; i < 3; i++) this.effects.push({ ring: true, x: k.x + 1, y: k.y - 20, color: "#ffffff", born: now + i * 500, life: 2400, r0: 2, grow: 26 });
+        this.label(e.block === "take_power" ? "POWER SEIZED" : "Power handed over", k.x, k.y - 34, "#ffffff");
+        break;
+      }
+      case "give_or_trade": {
+        const src = e.from ? pointOf(e.from) : this.agents.get("m" + fx.actorId) || PLACES.Kessa;
+        const dsts = e.place === "villages" ? ["Low Ford", "Reedmere", "Hollowmere"].map(pointOf) : [at];
+        for (const d of dsts) this.carts.push({ x: src.x, y: src.y + 4, tx: d.x, ty: d.y, color: look === "bribe" ? "#d8dde6" : "#e6c75a", label: look === "bribe" ? "+silver" : "+grain" });
+        break;
+      }
+      case "speak_to": break;
+      default: if (e.thing) this.label(e.thing, at.x, at.y - 12, "#e9dfc3");
+    }
+  }
+
+  emit(kind, zone, ms, rate) { this.emitters.push({ kind, ...zone, until: performance.now() + ms, rate }); }
+  bubble(agent, text) { if (text) this.effects.push({ bubble: true, agent, text: String(text).slice(0, 110), born: performance.now(), life: 6500 }); }
 
   hit(x, y) {
     let best = null, bd = 6;
@@ -217,7 +416,7 @@ export class Population {
 }
 function pick(arr) { return arr[Math.floor(rng() * arr.length)]; }
 
-export function drawLabels(ctx, scale) {
+export function drawLabels(ctx, scale, w) {
   ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center";
   const lab = (t, x, y) => { ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillText(t, x * scale + 1, y * scale + 1); ctx.fillStyle = "#f3ead2"; ctx.fillText(t, x * scale, y * scale); };
   lab("Hollowmere", PLACES.Hollowmere.x, PLACES.Hollowmere.y - 22);
@@ -226,4 +425,30 @@ export function drawLabels(ctx, scale) {
   lab("Kessa", PLACES.Kessa.x, PLACES.Kessa.y + 22);
   lab("Varn's dam", 438, 78);
   lab("to Varn →", 452, 150);
+  if (w) {
+    ctx.font = "10px system-ui, sans-serif";
+    for (const st of w.structures || []) { const p = structurePos(w, st); const t = st.name.length > 22 ? st.name.slice(0, 21) + "…" : st.name; ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillText(t, p.x * scale + 1, (p.y + 5) * scale + 1); ctx.fillStyle = "#e9dfc3"; ctx.fillText(t, p.x * scale, (p.y + 5) * scale); }
+  }
 }
+
+const VARN = { x: 466, y: 150 };
+function pointOf(name) { if (name === "Varn") return VARN; const p = PLACES[name]; return p ? { x: p.x, y: p.y + 4 } : PLACES.Kessa; }
+function score(a, e) { return (a.rebel ? 2 : 0) + (a.ref && e.ideaId && (a.ref.idea === e.ideaId || a.ref.faith === e.ideaId) ? 3 : 0) + (a.believer ? 1 : 0) + rng(); }
+const IDEA_COLORS = ["#c9a7ff", "#7fd1c7", "#ffb86b", "#9ad06a", "#ff8fb1", "#8fb8ff", "#f1d77a"];
+export function ideaColor(id) { return IDEA_COLORS[(id - 1) % IDEA_COLORS.length]; }
+function spawn(e) {
+  const x = e.x + rng() * e.w, y = e.y + rng() * e.h;
+  switch (e.kind) {
+    case "fire": return { x, y, vx: rand(-0.08, 0.08), vy: rand(-0.35, -0.12), life: 26 + rng() * 22, color: pick(["#ffd34a", "#ff9a2a", "#ff5a1f", "#e0321a"]) };
+    case "smoke": return { x, y: y - 3, vx: rand(-0.05, 0.12), vy: rand(-0.25, -0.1), life: 60 + rng() * 40, color: pick(["#4b4b4b", "#5d5d5d", "#3a3a3a"]), size: 2 };
+    case "poison": return { x, y, vx: rand(-0.05, 0.05), vy: rand(-0.18, -0.06), life: 40 + rng() * 30, color: pick(["#9fd14a", "#6fae2a", "#c6e86a"]) };
+    case "flood": return { x, y, vx: rand(-0.2, 0.2), vy: rand(-0.05, 0.1), life: 40 + rng() * 30, color: pick(["#4f9fd6", "#6fb6e6", "#3f86c4"]), size: 2 };
+    case "build": return { x, y: y + 3, vx: 0, vy: rand(-0.12, -0.04), life: 30 + rng() * 20, color: pick(["#c9b086", "#9c7a54", "#d8d0b8"]) };
+    case "sparks": return { x, y, vx: rand(-0.6, 0.6), vy: rand(-0.6, 0.3), g: 0.02, life: 12 + rng() * 10, color: pick(["#ffffff", "#ffd34a", "#ff5a4a"]) };
+    case "cheer": return { x, y, vx: rand(-0.03, 0.03), vy: rand(-0.3, -0.15), life: 30 + rng() * 15, color: pick(["#8fe08a", "#c6f0a0"]) };
+    case "jeer": return { x, y, vx: rand(-0.03, 0.03), vy: rand(-0.3, -0.15), life: 30 + rng() * 15, color: pick(["#ff6a5a", "#ff9a8a"]) };
+    default: return { x, y, vx: 0, vy: -0.2, life: 20, color: "#ffffff" };
+  }
+}
+function wrap(text, n) { const out = []; let line = ""; for (const word of String(text).split(/\s+/)) { if ((line + " " + word).trim().length > n) { if (line) out.push(line); line = word; } else line = (line + " " + word).trim(); } if (line) out.push(line); if (out.length > 3) out[2] = out[2].slice(0, n - 1) + "…"; return out; }
+function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
