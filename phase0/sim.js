@@ -73,7 +73,7 @@ export function createWorld(seed = 214) {
       "Reedmere": { pop: 240, water: "river", downstream: false, wells: false, food: 1, sick: 0, deaths: 0, feverDeaths: 0, hunger: 0, stock: 30, aid: 0, martyr: 0 },
       "Hollowmere": { pop: 220, water: "spring", downstream: false, wells: false, food: 1, sick: 0, deaths: 0, feverDeaths: 0, hunger: 0, stock: 40, aid: 0, martyr: 0 },
     },
-    kessaPop: 60,
+    kessaPop: 40,
     citizens: [],
     minds: [],
     ideas: [],
@@ -166,6 +166,19 @@ function totalPop(w) { return villageNames(w).reduce((a, v) => a + w.villages[v]
 function createOrUpdateIdea(w, mind, text) {
   const clean = String(text || "").trim();
   if (clean.length < 12) return null;
+  const followed = mind.ideaId ? w.ideas.find((i) => i.id === mind.ideaId) : null;
+  if (followed && followed.founderId !== mind.id) {
+    // A follower retells the cause in their own words; occasionally that becomes a split.
+    if (w.rng.chance(0.15) && !w.ideas.some((i) => i.founderId === mind.id)) {
+      const branch = { id: w.ideas.length + 1, founderId: mind.id, founder: mind.name, kind: followed.kind, tenet: clean, born: w.year, history: [{ year: w.year, tenet: clean }], parentId: followed.id,
+        name: `${ideaName(mind, followed.kind)} (split from ${followed.name})` };
+      w.ideas.push(branch); mind.ideaId = branch.id;
+      chron(w, "idea", `${mind.name} broke with ${followed.name} and began preaching a version of their own: "${clean}"`, mind.name);
+      return branch;
+    }
+    followed.history.push({ year: w.year, tenet: clean, by: mind.name });
+    return followed;
+  }
   let idea = w.ideas.find((i) => i.founderId === mind.id);
   const kind = mind.role === "priest" ? "faith" : "politics";
   if (idea) {
@@ -180,7 +193,7 @@ function createOrUpdateIdea(w, mind, text) {
   return idea;
 }
 function ideaName(mind, kind) {
-  const first = mind.name.replace(/^(King|General|High Priest|Queen|Prince|Lord Protector|Speaker)\s+/, "").split(" ")[0];
+  const first = mind.name.replace(/^(King|General|High Priest|Priestess|Captain|Monarch|Queen|Prince|Lord Protector|Speaker)\s+/, "").split(" ")[0];
   return kind === "faith" ? `the Teaching of ${first}` : `the Way of ${first}`;
 }
 export function ideaFollowers(w, idea) {
@@ -236,6 +249,7 @@ function actionsFor(w, mind) {
   if (mind.role === "ruler" && !w.varn.pendingOffer) list = list.filter((a) => a !== "accept_varn_offer" && a !== "reject_varn_offer");
   if (mind.role === "ruler" && w.government.councils) list = list.filter((a) => a !== "grant_village_councils");
   if (mind.role === "ruler" && w.government.type === "council") list = list.map((a) => a === "raise_taxes" ? "raise_taxes" : a);
+  if (!worstFeverVillage(w)) list = list.filter((a) => a !== "dig_wells");
   if (mind.role === "foreign" && w.mines === "varn") list = list.filter((a) => a !== "offer_grain_for_mines");
   if (mind.role === "foreign" && w.varn.pendingOffer) list = list.filter((a) => a !== "offer_grain_for_mines");
   return list;
@@ -290,9 +304,16 @@ function applyDecision(w, mind, d) {
   mind.lastAction = a; mind.lastSpeech = d.speech || ""; mind.lastReason = d.reason || "";
 
   // Beliefs about causes, and what they mean for discovery.
+  mind.pendingBeliefs = mind.pendingBeliefs || {};
   for (const [k, field] of [["drought", "drought_cause"], ["fever", "fever_cause"]]) {
     const before = mind.beliefs[k];
-    mind.beliefs[k] = d[field] || before;
+    const said = d[field];
+    if (!said) continue;
+    if (!before) mind.beliefs[k] = said;
+    else if (said !== before) {
+      if (mind.pendingBeliefs[k] === said) { mind.beliefs[k] = said; mind.pendingBeliefs[k] = null; }
+      else { mind.pendingBeliefs[k] = said; continue; }
+    } else { mind.pendingBeliefs[k] = null; continue; }
     const truth = k === "fever" ? "bad_water" : "varn_dam";
     if (before && before !== mind.beliefs[k] && (mind.beliefs[k] === truth || before === truth)) chron(w, "belief", `${mind.name} came to believe the ${k} is caused by ${String(mind.beliefs[k]).replace(/_/g, " ")} (no longer ${String(before).replace(/_/g, " ")}).`, mind.name);
   }
@@ -335,9 +356,9 @@ function applyDecision(w, mind, d) {
     }
     case "reject_varn_offer": w.varn.pendingOffer = null; w.varn.relation = clamp(w.varn.relation - 0.15, -1, 1); w.legitimacy += 0.03; say(`${mind.name} rejected Varn's offer.`); break;
     case "prepare_war": {
-      const draft = 20; w.soldiers += draft; V["Reedmere"].pop -= 10; V["Hollowmere"].pop -= 10;
+      const draft = w.soldiers < 200 ? 20 : 0; w.soldiers += draft; V["Reedmere"].pop -= draft / 2; V["Hollowmere"].pop -= draft / 2;
       w.warReady = true; w.varn.relation = clamp(w.varn.relation - 0.2, -1, 1); w.legitimacy -= 0.02;
-      say(`${mind.name} drafted ${draft} more spearmen and readied the army for war.`); break;
+      say(draft ? `${mind.name} drafted ${draft} more spearmen and readied the army for war.` : `${mind.name} kept the army on a war footing.`); break;
     }
     case "grant_village_councils": {
       w.government.councils = true; w.tax = Math.min(w.tax, 0.15); w.legitimacy += 0.15;
@@ -402,7 +423,7 @@ function succeed(w, fallen) {
 
 function generalCoup(w, gen) {
   const r = ruler(w);
-  if (w.loyalty > 0.45 && w.legitimacy < 0.45) {
+  if (w.loyalty > 0.6 && w.legitimacy < 0.3) {
     if (r) { r.alive = false; r.fate = `deposed by ${gen.name} in ${w.year}`; }
     gen.role = "ruler"; gen.title = `Lord Protector ${gen.name.replace("General ", "")}`;
     w.government = { type: "military", name: `the army under ${gen.name}`, councils: w.government.councils };
@@ -476,7 +497,7 @@ function updateWorld(w) {
   }
   // Granary and army.
   w.granary += taxed;
-  const armyNeed = w.soldiers + w.kessaPop;
+  const armyNeed = w.soldiers * 0.8 + w.kessaPop;
   if (w.varn.pendingOffer && w.year - w.varn.pendingOffer.year >= 2) { w.varn.pendingOffer = null; w.varn.relation = clamp(w.varn.relation - 0.1, -1, 1); chron(w, "diplomacy", `Varn's offer went unanswered and was withdrawn.`); }
   if (w.varn.pendingDemand) { /* unpaid tribute angers Varn */ w.varn.relation = clamp(w.varn.relation - 0.15, -1, 1); w.varn.pendingDemand = false; }
   if (w.granary >= armyNeed) { w.granary -= armyNeed; w.loyalty += w.flags.feedSoldiers ? 0.08 : 0.02; }
@@ -487,7 +508,7 @@ function updateWorld(w) {
   }
   w.loyalty = clamp(w.loyalty);
   if (w.soldiers < 80 && w.granary > 100) { const r = 8; w.soldiers += r; V["Reedmere"].pop -= 4; V["Hollowmere"].pop -= 4; }
-  if (w.mines === "oren") w.granary += 25; // greenstone trade brings some grain
+  if (w.mines === "oren") w.granary += 60; // greenstone trade brings grain from the lowlands
 
   // Legitimacy drift.
   const avgFood = totalFood / Math.max(1, totalPopV);
@@ -577,10 +598,14 @@ function resolveUprisings(w) {
   const where = villagesUp.join(" and ");
   if (rebels > defenders) {
     const r = ruler(w);
-    const idea = leader && leader.ideaId ? w.ideas.find((i) => i.id === leader.ideaId) : w.ideas.filter((i) => i.kind === "politics").sort((a, b) => ideaFollowers(w, b).total - ideaFollowers(w, a).total)[0];
+    const rebelIdeas = {};
+    for (const c of w.citizens) if (c.alive && c.active && c.idea && c.idea !== w.government.ideaId) rebelIdeas[c.idea] = (rebelIdeas[c.idea] || 0) + 1;
+    const topId = Object.entries(rebelIdeas).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const idea = leader && leader.ideaId && leader.ideaId !== w.government.ideaId ? w.ideas.find((i) => i.id === leader.ideaId)
+      : topId ? w.ideas.find((i) => i.id === +topId) : null;
     if (r) { r.alive = false; r.fate = `overthrown in ${w.year}`; }
-    const newRuler = leader || liveMinds(w).find((m) => m.role === "organizer");
-    w.government = { type: "council", name: idea ? `the councils of ${idea.name}` : "the village councils", councils: true, ideaId: idea?.id };
+    const newRuler = leader || (idea && liveMinds(w).find((m) => m.ideaId === idea.id && m.role === "organizer")) || liveMinds(w).find((m) => m.role === "organizer");
+    w.government = { type: "council", name: idea ? `the councils of ${idea.name}` : "the village assemblies", councils: true, ideaId: idea?.id };
     w.tax = 0.15; w.legitimacy = 0.7; w.arrestRisk = 0.05; w.loyalty = 0.5; w.soldiers = Math.max(60, round(w.soldiers * 0.7));
     if (newRuler) { newRuler.role = "ruler"; newRuler.title = `Speaker of the Valley Council, ${newRuler.name}`; newRuler.goals += "; keep the new councils alive"; }
     chron(w, "revolution", `The people of ${where} rose up${leader ? ` behind ${leader.name}` : ""}. About ${round(rebels)} rebels overwhelmed the soldiers.${r ? ` ${r.name} was overthrown.` : ""} The valley is now ruled by ${w.government.name}.`);
@@ -627,7 +652,7 @@ function fillRoles(w) {
       }
     }
   }
-  if (!has("general") && liveMinds(w).length < 10) addMind(w, { name: `Captain ${nm()}`, role: "general", place: "Kessa", age: 38, traits: "ambitious, hard, respected by the ranks", goals: "keep the army strong and paid; rise higher", motive: "You rose from the ranks and the soldiers trust you more than their rulers.", secret: "You wonder whether the army should rule.", memories: [`You were given command of the army in ${w.year}.`] }) && chron(w, "rise", `A new commander took charge of the army.`);
+  if (!has("general") && liveMinds(w).length < 10) addMind(w, { name: `Captain ${nm()}`, role: "general", place: "Kessa", age: 38, traits: "ambitious, hard, respected by the ranks", goals: "keep the army strong and paid; rise higher", motive: "You rose from the ranks and the soldiers trust you more than their rulers.", secret: "Some of your officers whisper that the army should rule; you have not decided.", memories: [`You were given command of the army in ${w.year}.`] }) && chron(w, "rise", `A new commander took charge of the army.`);
   if (!has("priest") && liveMinds(w).length < 10) addMind(w, { name: `Priestess ${nm()}`, role: "priest", place: "Kessa", age: 35, traits: "devout, sharp-tongued, eager to restore the temple's power", goals: "make the temple respected again", motive: "The temple has lost its voice and you mean to restore it.", secret: "You doubt some of the old rituals work.", memories: [`You became head of the temple in ${w.year}.`] }) && chron(w, "rise", `A new head of the temple was chosen.`);
   if (!has("merchant") && liveMinds(w).length < 10) addMind(w, { name: `${nm()} the Trader`, role: "merchant", place: "Reedmere", age: 30, traits: "shrewd, restless, hungry for wealth", goals: "grow rich from the ridge trade", motive: "You want what the old merchant families had.", secret: "You know the smugglers' paths over the ridge.", memories: [`You took over a grain business in ${w.year}.`] });
   if (!has("foreign")) addMind(w, { name: `Monarch ${nm()} of Varn`, role: "foreign", place: "Varn", age: 30, traits: "young, proud, eager to outdo the last ruler of Varn", goals: "gain Oren's greenstone; keep Varn strong", motive: "You must prove yourself the equal of the ruler before you.", secret: "Varn's own nobles test your strength.", memories: [`You took Varn's throne in ${w.year}.`] });
