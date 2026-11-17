@@ -47,6 +47,7 @@ export const ROLE_ACTIONS = {
   priest: ["preach_obedience", "preach_against_the_ruler", "hold_rain_ritual", "declare_omen", "distribute_temple_grain", "tend_the_sick", "do_nothing"],
   organizer: ["organize_neighbors_secretly", "speak_out_publicly", "hide_grain", "petition_the_ruler", "dig_wells", "start_uprising", "flee_valley", "do_nothing"],
   merchant: ["sell_grain_to_varn", "sell_grain_at_high_price", "donate_grain", "fund_rebels", "fund_the_ruler", "hoard_and_wait"],
+  prophet: ["preach_the_vision", "speak_out_publicly", "organize_neighbors_secretly", "petition_the_ruler", "dig_wells", "start_uprising", "flee_valley", "do_nothing"],
   foreign: ["offer_grain_for_mines", "open_the_dam", "raise_the_dam", "demand_tribute", "fund_rebels_in_oren", "invade_oren", "wait"],
 };
 
@@ -83,6 +84,7 @@ export function createWorld(seed = 214) {
     flags: { rebelBoost: 0, ritualThisYear: false, careThisYear: false, publicSpeakers: new Set(), uprisingCalls: [] },
     nextMindId: 1,
     ended: false,
+    god: { power: 100, max: 100, believers: 0, acts: [] },
   };
 
   // Named citizens: 12 per village.
@@ -151,8 +153,8 @@ export function addMind(w, m) {
   return mind;
 }
 
-function chron(w, kind, text, who) { const e = { year: w.year, kind, text, who }; w.chronicle.push(e); w.yearEvents.push(e); return e; }
-function remember(m, text) { m.memories.push(`Year ${m.__year ?? ""}: ${text}`.replace("Year : ", "")); if (m.memories.length > 10) m.memories.splice(0, m.memories.length - 10); }
+export function chron(w, kind, text, who) { const e = { year: w.year, kind, text, who }; w.chronicle.push(e); w.yearEvents.push(e); return e; }
+export function remember(m, text) { m.memories.push(`Year ${m.__year ?? ""}: ${text}`.replace("Year : ", "")); if (m.memories.length > 10) m.memories.splice(0, m.memories.length - 10); }
 function rememberAll(w, text, filter = () => true) { for (const m of liveMinds(w)) if (filter(m)) remember(m, text); }
 export function liveMinds(w) { return w.minds.filter((m) => m.alive); }
 function mindByRole(w, role) { return liveMinds(w).find((m) => m.role === role); }
@@ -163,7 +165,7 @@ function totalPop(w) { return villageNames(w).reduce((a, v) => a + w.villages[v]
 // ---------------------------------------------------------------------------
 // Ideas (ideologies and faiths)
 // ---------------------------------------------------------------------------
-function createOrUpdateIdea(w, mind, text) {
+export function createOrUpdateIdea(w, mind, text, opts = {}) {
   const clean = String(text || "").trim();
   if (clean.length < 12) return null;
   const followed = mind.ideaId ? w.ideas.find((i) => i.id === mind.ideaId) : null;
@@ -179,14 +181,14 @@ function createOrUpdateIdea(w, mind, text) {
     followed.history.push({ year: w.year, tenet: clean, by: mind.name });
     return followed;
   }
-  let idea = w.ideas.find((i) => i.founderId === mind.id);
-  const kind = mind.role === "priest" ? "faith" : "politics";
+  let idea = w.ideas.find((i) => i.founderId === mind.id && (!opts.creditsGod || i.creditsGod));
+  const kind = opts.kind || (mind.role === "priest" || mind.role === "prophet" ? "faith" : "politics");
   if (idea) {
     if (idea.tenet !== clean) { idea.history.push({ year: w.year, tenet: clean }); idea.tenet = clean; }
     return idea;
   }
-  idea = { id: w.ideas.length + 1, founderId: mind.id, founder: mind.name, kind, tenet: clean, born: w.year, history: [{ year: w.year, tenet: clean }], name: null };
-  idea.name = ideaName(mind, kind);
+  idea = { id: w.ideas.length + 1, founderId: mind.id, founder: mind.name, kind, tenet: clean, born: w.year, history: [{ year: w.year, tenet: clean }], name: null, creditsGod: !!opts.creditsGod };
+  idea.name = opts.name || ideaName(mind, kind);
   w.ideas.push(idea);
   mind.ideaId = idea.id;
   chron(w, "idea", `${mind.name} began to speak of a new ${kind === "faith" ? "teaching" : "idea"}: "${clean}"`, mind.name);
@@ -232,6 +234,7 @@ export function observationsFor(w, mind) {
       obs.push(`${idea.founderId === mind.id ? "Your own" : `${idea.founder}'s`} ${idea.kind === "faith" ? "teaching" : "idea"} (${idea.name}) says: "${idea.tenet}" About ${f.total} people follow it.`);
     }
   }
+  if (mind.creditsGod && mind.godName) obs.push(`You believe ${mind.godName} has spoken to you.`);
   const active = w.citizens.filter((c) => c.alive && c.active).length;
   if (active > 3 && mind.role !== "foreign") obs.push(`There is open anger in the villages; about ${round(active / w.citizens.filter((c) => c.alive).length * 100)}% of folk speak of defiance.`);
   if (mind.role === "foreign") {
@@ -380,6 +383,7 @@ function applyDecision(w, mind, d) {
     case "distribute_temple_grain": V["Low Ford"].aid += 50; V["Reedmere"].aid += 20; w.flags.templeCharity = mind.id; say(`${mind.name} gave the temple's grain to the hungry of Low Ford and Reedmere.`); break;
     case "tend_the_sick": w.flags.careThisYear = true; say(`${mind.name} sent the temple's acolytes to tend the fevered.`); break;
     // --- organizer / commoner ---
+    case "preach_the_vision": w.flags.speaking = [...(w.flags.speaking || []), mind]; w.flags.preachingGod = true; say(`${mind.name} preached the vision of the god to all who would listen.`); break;
     case "organize_neighbors_secretly": w.flags.organizing = [...(w.flags.organizing || []), mind]; say(`${mind.name} met in secret with neighbors in ${mind.place}.`); break;
     case "speak_out_publicly": w.flags.publicSpeakers.add(mind.id); w.flags.speaking = [...(w.flags.speaking || []), mind]; w.legitimacy -= 0.03; say(`${mind.name} spoke out publicly in ${mind.place}.`); break;
     case "hide_grain": if (V[mind.place]) V[mind.place].hidden = true; say(`${mind.name} helped ${mind.place} hide grain from the tax collectors.`); break;
@@ -438,7 +442,7 @@ function generalCoup(w, gen) {
 
 function bereave(w, c, amount) { for (const o of w.citizens) if (o.alive && o.family === c.family) o.grief = clamp(o.grief + amount); }
 
-function promote(w, c, why, ideaId = null) {
+export function promote(w, c, why, ideaId = null) {
   if (liveMinds(w).length >= 10) return null;
   c.promoted = true;
   const m = addMind(w, {
@@ -553,6 +557,12 @@ function updateWorld(w) {
     c.active = (hasCause && net > threshold) || net > 0.45;
   }
 
+  // Divine power: refills slowly, faster the more people credit the god for its real acts.
+  if (w.god) {
+    countBelievers(w);
+    w.god.power = Math.min(w.god.max, w.god.power + 2 + w.god.believers / 25);
+  }
+
   // Promotion of ordinary people who have suffered and found a cause.
   for (const c of w.citizens) {
     if (c.alive && !c.promoted && !c.jailed && c.grief > 0.5 && c.idea && c.active && rng.chance(0.25)) {
@@ -573,6 +583,16 @@ function updateWorld(w) {
   }
   fillRoles(w);
   return { flow };
+}
+
+export function countBelievers(w) {
+  const alive = w.citizens.filter((c) => c.alive);
+  const godIdeas = new Set(w.ideas.filter((i) => i.creditsGod).map((i) => i.id));
+  const share = alive.length ? alive.filter((c) => c.creditsGod || godIdeas.has(c.idea)).length / alive.length : 0;
+  const valleyPop = villageNames(w).reduce((a, v) => a + w.villages[v].pop, 0);
+  const minds = liveMinds(w).filter((m) => m.creditsGod).length;
+  w.god.believers = round(share * valleyPop) + minds;
+  return w.god.believers;
 }
 
 function activeShare(w, v) {
@@ -706,7 +726,7 @@ export async function stepYear(w, decide, onMind) {
   return w.yearEvents;
 }
 
-function order(m) { return { foreign: 0, merchant: 1, priest: 2, organizer: 3, general: 4, ruler: 5 }[m.role] ?? 3; }
+function order(m) { return { foreign: 0, merchant: 1, priest: 2, prophet: 2, organizer: 3, general: 4, ruler: 5 }[m.role] ?? 3; }
 
 // ---------------------------------------------------------------------------
 // A rule-based stand-in mind, for testing without a model.

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Demiurge – Phase 1: The Valley Map</title>
+<style>
+  :root { --bg:#12141a; --panel:#1b1e27; --panel2:#232735; --text:#e6e8ef; --muted:#9aa0b4; --accent:#e0b354; --good:#5fbf7f; --bad:#e06464; --warn:#e0a454; --line:#2e3344; --holy:#f3e9b5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:10px 18px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { margin:0; font-size:19px; } h1 span { color:var(--accent); }
+  h2 { font-size:15px; margin:0 0 8px; } h3 { font-size:12px; margin:10px 0 4px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .sub { color:var(--muted); }
+  main { display:grid; grid-template-columns:minmax(0, 960px) 380px; gap:14px; padding:12px 16px 30px; justify-content:center; }
+  @media (max-width:1400px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .stack > * + * { margin-top:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  canvas#map { width:100%; max-width:960px; aspect-ratio:960/600; image-rendering:pixelated; border-radius:10px; border:1px solid var(--line); cursor:crosshair; display:block; background:#2f4f2b; }
+  button { background:var(--accent); color:#1a1400; border:0; border-radius:8px; padding:7px 12px; font-weight:600; cursor:pointer; }
+  button.secondary { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  button.holy { background:var(--holy); color:#2b2405; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  select, input[type=number], textarea { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; }
+  textarea { width:100%; resize:vertical; }
+  .status { font-family:ui-monospace,Consolas,monospace; font-size:12px; background:#0d0f14; border-radius:8px; padding:8px; max-height:120px; overflow:auto; white-space:pre-wrap; }
+  .bar { height:10px; background:var(--panel2); border-radius:5px; overflow:hidden; } .bar > div { height:100%; background:linear-gradient(90deg,#c9a227,#f3e9b5); width:0%; transition:width .4s; }
+  .stat { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; } .stat .k { color:var(--muted); }
+  .card { background:var(--panel2); border-radius:8px; padding:10px; }
+  .card .name { font-weight:700; font-size:15px; } .card .role { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .quote { font-style:italic; color:#d9d2bd; margin:6px 0; }
+  .channels { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .channels label { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px; cursor:pointer; font-size:12px; text-align:center; }
+  .channels input { display:none; }
+  .channels label:has(input:checked) { border-color:var(--holy); background:#2c2914; }
+  .channels b { display:block; font-size:13px; }
+  .feed { max-height:300px; overflow:auto; font-size:13px; }
+  .feed .ev { padding:3px 0 3px 8px; border-left:3px solid var(--line); margin:3px 0; }
+  .feed .ev.revolution, .feed .ev.revolt, .feed .ev.war { border-color:var(--bad); }
+  .feed .ev.idea, .feed .ev.rise { border-color:#b48ee0; } .feed .ev.god { border-color:var(--holy); background:#211f12; }
+  .feed .ev.summary { border-color:var(--accent); background:#262212; } .feed .ev .sp { display:block; color:var(--muted); font-style:italic; }
+  .feed .yr { color:var(--accent); font-weight:700; margin-top:6px; }
+  .minds { display:flex; flex-wrap:wrap; gap:6px; } .minds button { padding:4px 8px; font-size:12px; font-weight:500; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:6px; }
+  .legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .warnbox { border:1px solid var(--warn); background:#2b2416; border-radius:8px; padding:8px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>The Demiurge</span> · Phase 1: The Valley Map</h1>
+  <span class="sub">Watch the valley live. Click anyone to hear their thoughts, or speak to them as a god.</span>
+</header>
+<main>
+  <section class="stack">
+    <canvas id="map" width="960" height="600"></canvas>
+    <div class="legend">
+      <span><i style="background:#c9b27a"></i>villager</span><span><i style="background:#e0b354"></i>notable mind</span><span><i style="background:#e6e6ff"></i>prophet</span>
+      <span><i style="background:#8f2f2f"></i>soldier</span><span><i style="background:#e0463e"></i>in open defiance</span><span><i style="background:#9fd17a"></i>sick</span><span><i style="background:#fffbe0"></i>believer (dot above head)</span>
+      <span>Flag on Kessa: <b style="color:#c9a227">gold</b> crown · <b style="color:#3d7ab8">blue</b> councils · <b style="color:#c94c4c">red</b> army</span>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <select id="engine">
+          <option value="gemma-e4b">Gemma 4 E4B (recommended)</option>
+          <option value="gemma-e2b">Gemma 4 E2B (faster)</option>
+          <option value="mock">No AI (instant, for testing)</option>
+        </select>
+        <span class="sub">Years</span><input id="years" type="number" min="1" max="200" value="30" style="width:64px">
+        <span class="sub">Seed</span><input id="seed" type="number" value="214" style="width:80px">
+        <button id="startBtn">Start history</button>
+        <button id="pauseBtn" class="secondary" disabled>Pause</button>
+        <button id="stepBtn" class="secondary">1 year</button>
+        <button id="resetBtn" class="secondary">New world</button>
+        <span id="yearLabel" class="sub"></span>
+      </div>
+      <div id="status" class="status" style="margin-top:8px">Idle.</div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Chronicle</h2>
+        <div class="row"><button class="secondary" id="copyChron" style="padding:4px 9px;font-size:12px">Copy chronicle</button><span id="copyMsg" class="sub"></span></div></div>
+      <div id="feed" class="feed"></div>
+    </div>
+  </section>
+
+  <aside class="stack">
+    <div class="panel">
+      <h2>You, the god</h2>
+      <div class="row" style="justify-content:space-between"><span>Divine power</span><span id="powerText"></span></div>
+      <div class="bar"><div id="powerBar"></div></div>
+      <div class="sub" style="font-size:12px;margin-top:4px" id="believersText"></div>
+    </div>
+
+    <div class="panel" id="selPanel">
+      <h2>Selected</h2>
+      <div id="selected" class="sub">Click a villager or a notable (gold) on the map, or pick a name below.</div>
+      <h3>Notable minds</h3>
+      <div id="mindsList" class="minds"></div>
+    </div>
+
+    <div class="panel" id="godPanel">
+      <h2>Speak as god</h2>
+      <div id="godTarget" class="sub">Select someone first.</div>
+      <div class="channels" style="margin-top:8px">
+        <label><input type="radio" name="ch" value="dream" checked><b>Dream</b>10 power<br><span class="sub">hidden, easy to doubt</span></label>
+        <label><input type="radio" name="ch" value="sign"><b>Sign</b>25 power<br><span class="sub">a wonder others see</span></label>
+        <label><input type="radio" name="ch" value="voice"><b>Voice</b>40 power<br><span class="sub">unmistakable</span></label>
+      </div>
+      <textarea id="godMsg" rows="3" placeholder="For a dream or voice: your words. For a sign: describe the wonder (e.g. 'the well water glows silver at dusk')." style="margin-top:8px"></textarea>
+      <div class="row" style="margin-top:6px"><button id="godBtn" class="holy" disabled>Send</button><span id="godNote" class="sub"></span></div>
+      <div id="godResult"></div>
+    </div>
+
+    <div class="panel">
+      <h2>The realm</h2>
+      <div id="realm" class="stat"></div>
+    </div>
+  </aside>
+</main>
+
+<script type="importmap">
+{ "imports": { "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2/dist/transformers.min.js" } }
+</script>
+<script type="module">
+import { createWorld, stepYear, mockDecide, liveMinds } from "../phase0/sim.js";
+import { GOD_COSTS, buildGodPrompt, applyGodAct, mockGodResponse, buildThoughtPrompt } from "./god.js";
+import { LOW_W, LOW_H, SCALE, drawTerrain, drawLabels, Population, PLACES } from "./map.js";
+
+const SO_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers-structured-output@4.3.2/dist/index.js";
+const MODELS = { "gemma-e4b": { name: "Gemma 4 E4B", id: "onnx-community/gemma-4-E4B-it-ONNX" }, "gemma-e2b": { name: "Gemma 4 E2B", id: "onnx-community/gemma-4-E2B-it-ONNX" } };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const logEl = $("status");
+function log(m) { logEl.textContent += `\n[${new Date().toLocaleTimeString()}] ${m}`; logEl.scrollTop = logEl.scrollHeight; }
+window.addEventListener("error", (e) => log("Page error: " + e.message));
+window.addEventListener("unhandledrejection", (e) => log("Error: " + (e.reason?.message || e.reason)));
+
+// ---------------------------------------------------------------------------
+// AI: one model, one request at a time (simulation and god share the GPU)
+// ---------------------------------------------------------------------------
+let T = null, SO = null, model = null, loadedKey = null, deviceLost = false;
+let gpuChain = Promise.resolve();
+function withGpu(fn) { const p = gpuChain.then(fn); gpuChain = p.catch(() => {}); return p; }
+const useMock = () => $("engine").value === "mock" || deviceLost;
+
+async function ensureModel() {
+  const key = $("engine").value;
+  if (key === "mock") return;
+  if (!navigator.gpu) throw new Error("WebGPU is not available. Use Chrome or Edge.");
+  if (!T) { log("Loading Transformers.js…"); T = await import("@huggingface/transformers"); }
+  if (SO === null) { try { SO = await import(SO_URL); } catch { SO = false; log("Structured output unavailable; parsing JSON by hand."); } }
+  if (loadedKey === key && model) return;
+  if (model) { try { await model.model.dispose(); } catch {} model = null; }
+  const m = MODELS[key]; log(`Loading ${m.name}…`);
+  const t0 = performance.now(); let last = 0; const files = {};
+  const progress_callback = (p) => { if (p.status === "progress" && p.file) { files[p.file] = p; if (Date.now() - last > 2000) { last = Date.now(); const l = Object.values(files).reduce((a, f) => a + (f.loaded || 0), 0), t = Object.values(files).reduce((a, f) => a + (f.total || 0), 0); log(`  downloading ${(l / 1e9).toFixed(2)} / ${(t / 1e9).toFixed(2)} GB`); } } };
+  try {
+    const processor = await T.AutoProcessor.from_pretrained(m.id);
+    const mdl = await T.Gemma4ForConditionalGeneration.from_pretrained(m.id, { dtype: "q4f16", device: "webgpu", progress_callback });
+    model = { processor, model: mdl, tokenizer: processor.tokenizer };
+  } catch (e) {
+    const msg = /^\d+$/.test(String(e?.message ?? e)) ? `the engine crashed or ran out of memory while starting (code ${e?.message ?? e}). Close other AI tabs, restart Chrome, or pick E2B.` : (e?.message || String(e));
+    throw new Error(`Could not start ${m.name}: ${msg}`);
+  }
+  if (SO) { try { SO.StructuredOutputProcessor.warmup?.(model.tokenizer); } catch {} }
+  loadedKey = key; log(`${m.name} ready in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
+}
+
+function extractJson(t) {
+  if (!t) return null; t = t.replace(/```json|```/g, "");
+  try { return JSON.parse(t.trim()); } catch {}
+  const s = t.indexOf("{"), e = t.lastIndexOf("}"); if (s >= 0 && e > s) { try { return JSON.parse(t.slice(s, e + 1)); } catch {} }
+  return null;
+}
+async function generateJson(system, user, schema, maxTokens = 260) {
+  return withGpu(async () => {
+    const messages = [{ role: "user", content: [{ type: "text", text: `${system}\n\n${user}` }] }];
+    const prompt = model.processor.apply_chat_template(messages, { add_generation_prompt: true, enable_thinking: false });
+    const inputs = model.tokenizer(prompt, { add_special_tokens: false });
+    const opts = { max_new_tokens: maxTokens, do_sample: true, temperature: 0.8, top_p: 0.95 };
+    if (SO && schema) { try { opts.logits_processor = [new SO.StructuredOutputProcessor(model.tokenizer, { type: "json_schema", json_schema: schema })]; } catch {} }
+    try {
+      const out = await model.model.generate({ ...inputs, ...opts });
+      const n = inputs.input_ids.dims.at(-1);
+      return extractJson(model.processor.batch_decode(out.slice(null, [n, null]), { skip_special_tokens: true })[0]);
+    } catch (e) {
+      if (/is lost|device lost/i.test(String(e?.message))) { deviceLost = true; log("GPU connection lost: switching to stand-in minds. Reload the page to restore the AI."); }
+      throw e;
+    }
+  });
+}
+
+async function aiDecide(mind, prompt, w) {
+  if (useMock()) return mockDecide(mind, prompt, w);
+  try {
+    const d = await generateJson(prompt.system, prompt.user, prompt.schema);
+    if (!d || !prompt.actions.includes(d.action)) return mockDecide(mind, prompt, w);
+    return d;
+  } catch (e) { log(`  ${mind.name}: AI error, using a stand-in choice.`); return mockDecide(mind, prompt, w); }
+}
+
+// ---------------------------------------------------------------------------
+// World, map and loop
+// ---------------------------------------------------------------------------
+let world = createWorld(+$("seed").value);
+const pop = new Population();
+const canvas = $("map"), ctx = canvas.getContext("2d");
+const terrain = document.createElement("canvas"); terrain.width = LOW_W; terrain.height = LOW_H;
+const low = document.createElement("canvas"); low.width = LOW_W; low.height = LOW_H;
+const lctx = low.getContext("2d");
+let selected = null; // { kind: "citizen" | "mind", ref, agentId }
+
+function refreshMap() { drawTerrain(terrain.getContext("2d"), world); pop.sync(world); }
+refreshMap();
+
+function frame() {
+  pop.step();
+  lctx.imageSmoothingEnabled = false;
+  lctx.drawImage(terrain, 0, 0);
+  pop.draw(lctx, selected?.agentId);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(low, 0, 0, LOW_W * SCALE, LOW_H * SCALE);
+  drawLabels(ctx, SCALE);
+  pop.drawEffects(ctx, SCALE);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+let running = false, pauseRequested = false;
+async function runYears(n) {
+  if (running) return;
+  running = true; pauseRequested = false; setButtons();
+  try {
+    await ensureModel();
+    for (let i = 0; i < n && !world.ended && !pauseRequested; i++) {
+      log(`Year ${world.year}: the minds are thinking…`);
+      const events = await stepYear(world, aiDecide, (m, d) => { log(`  ${m.name}: ${d.action.replace(/_/g, " ")}`); renderSide(); });
+      if ((world.year - 214) % 10 === 0 && !useMock() && model) await writeChronicle(world.year - 10);
+      refreshMap(); pop.onYear(events); renderAll();
+    }
+    log(pauseRequested ? "Paused." : "Done.");
+  } catch (e) { log("Stopped: " + (e.message || e)); }
+  finally { running = false; setButtons(); }
+}
+async function writeChronicle(from) {
+  const events = world.chronicle.filter((e) => e.year >= from && e.kind !== "act").map((e) => `${e.year}: ${e.text}`).slice(-60);
+  const schema = { type: "object", properties: { title: { type: "string", maxLength: 80 }, entry: { type: "string", maxLength: 900 } }, required: ["title", "entry"], additionalProperties: false };
+  try {
+    const c = await generateJson("You write history for a fictional world in a strategy game. Reply ONLY with one JSON object.", `You are the court chronicler of the Valley of Oren, writing about the years ${from} to ${world.year - 1}, with your own biases. Use only these events:\n${events.join("\n")}\nReply with JSON: {"title", "entry" (3-5 sentences)}`, schema, 320);
+    if (c) world.chronicle.push({ year: world.year - 1, kind: "summary", text: `${c.title}: ${c.entry}` });
+  } catch {}
+}
+function setButtons() {
+  $("startBtn").disabled = running; $("stepBtn").disabled = running; $("resetBtn").disabled = running; $("pauseBtn").disabled = !running;
+}
+$("startBtn").onclick = () => runYears(Math.max(1, +$("years").value || 30));
+$("stepBtn").onclick = () => runYears(1);
+$("pauseBtn").onclick = () => { pauseRequested = true; log("Will pause at the end of this year."); };
+$("resetBtn").onclick = () => { world = createWorld(+$("seed").value || 214); deviceLost = false; selected = null; pop.agents.clear(); refreshMap(); renderAll(); logEl.textContent = "New world."; };
+
+// ---------------------------------------------------------------------------
+// Selecting people
+// ---------------------------------------------------------------------------
+canvas.addEventListener("click", (ev) => {
+  const r = canvas.getBoundingClientRect();
+  const x = ((ev.clientX - r.left) / r.width) * LOW_W, y = ((ev.clientY - r.top) / r.height) * LOW_H;
+  const a = pop.hit(x, y);
+  if (a) { select(a.kind === "mind" ? "mind" : "citizen", a.ref, a.id); pop.ring(a.x, a.y, "#ffffff"); }
+});
+function select(kind, ref, agentId) { selected = { kind, ref, agentId: agentId || (kind === "mind" ? "m" + ref.id : "c" + ref.id) }; renderSelected(); renderGodTarget(); }
+
+function renderSelected() {
+  const el = $("selected");
+  if (!selected) { el.innerHTML = "Click a villager or a notable (gold) on the map, or pick a name below."; return; }
+  const s = selected.ref;
+  if (selected.kind === "citizen") {
+    const idea = s.idea ? world.ideas.find((i) => i.id === s.idea) : null;
+    el.innerHTML = `<div class="card"><div class="name">${esc(s.name)} of ${esc(s.village)}</div>
+      <div class="role">${esc(s.job)} · age ${s.age} · ${esc(s.trait)}</div>
+      <div style="font-size:13px;margin-top:4px">${s.active ? '<b style="color:#e06464">In open defiance.</b> ' : ""}${idea ? `Follows <b>${esc(idea.name)}</b>. ` : "Follows no cause. "}${s.creditsGod ? `Believes <b>${esc(s.godName || "a god")}</b> has shown itself. ` : ""}${s.grief > 0.4 ? "Grieving." : ""}</div>
+      <div id="thought" class="quote"></div>
+      <button class="secondary" id="thinkBtn">Hear their thoughts</button></div>`;
+    $("thinkBtn").onclick = () => hearThoughts(s);
+  } else {
+    const idea = s.ideaId ? world.ideas.find((i) => i.id === s.ideaId) : null;
+    el.innerHTML = `<div class="card"><div class="name">${esc(s.title)}</div><div class="role">${esc(s.role)}${s.alive ? "" : " · gone"}</div>
+      <div style="font-size:13px;margin-top:4px"><b>Drives:</b> ${esc(s.motive)}</div>
+      ${s.lastSpeech ? `<div class="quote">"${esc(s.lastSpeech)}"</div>` : ""}
+      ${s.lastReason ? `<div style="font-size:13px"><b>Private thoughts:</b> ${esc(s.lastReason)}</div>` : ""}
+      ${idea ? `<div style="font-size:13px"><b>${esc(idea.name)}:</b> <i>"${esc(idea.tenet)}"</i></div>` : ""}
+      ${s.creditsGod ? `<div style="font-size:13px;color:#f3e9b5">Believes ${esc(s.godName || "a god")} has spoken to them.</div>` : ""}
+      <details style="margin-top:4px"><summary class="sub" style="font-size:12px">Memories</summary><ul style="margin:4px 0 0 16px;padding:0;font-size:12px">${s.memories.slice(-8).map((m) => `<li>${esc(m)}</li>`).join("")}</ul></details></div>`;
+  }
+}
+
+async function hearThoughts(c) {
+  const out = $("thought"); if (!out) return;
+  if (useMock()) { out.textContent = `"(stand-in) I wonder how we will get through the winter."`; return; }
+  out.textContent = "…listening…"; $("thinkBtn").disabled = true;
+  try {
+    await ensureModel();
+    const p = buildThoughtPrompt(world, c);
+    const r = await generateJson(p.system, p.user, p.schema, 120);
+    out.textContent = r ? `"${r.thought}" (${r.feeling})` : "(no clear thought)";
+  } catch (e) { out.textContent = "(could not hear them: " + (e.message || e) + ")"; }
+  finally { const b = $("thinkBtn"); if (b) b.disabled = false; }
+}
+
+// ---------------------------------------------------------------------------
+// Speaking as god
+// ---------------------------------------------------------------------------
+function channel() { return document.querySelector('input[name="ch"]:checked').value; }
+function renderGodTarget() {
+  const t = selected?.ref;
+  $("godTarget").innerHTML = t ? `Speaking to <b>${esc(selected.kind === "mind" ? t.title : `${t.name} of ${t.village}`)}</b>` : "Select someone first.";
+  updateGodButton();
+}
+function updateGodButton() {
+  const cost = GOD_COSTS[channel()];
+  const ok = selected && (selected.kind !== "mind" || selected.ref.alive) && world.god.power >= cost && $("godMsg").value.trim().length > 2;
+  $("godBtn").disabled = !ok;
+  $("godNote").textContent = world.god.power < cost ? `Not enough power (${Math.floor(world.god.power)} / ${cost}).` : "";
+}
+document.querySelectorAll('input[name="ch"]').forEach((r) => r.addEventListener("change", updateGodButton));
+$("godMsg").addEventListener("input", updateGodButton);
+
+$("godBtn").onclick = async () => {
+  const target = selected.ref, ch = channel(), msg = $("godMsg").value.trim();
+  $("godBtn").disabled = true; $("godResult").innerHTML = `<div class="sub" style="margin-top:8px">The ${ch} reaches them… ${running ? "(waiting for the minds to finish their current thought)" : ""}</div>`;
+  const agent = pop.agents.get(selected.agentId);
+  if (agent) { pop.ring(agent.x, agent.y, "#f3e9b5"); pop.label(ch === "sign" ? "A sign!" : ch === "voice" ? "A voice…" : "A dream…", agent.x, agent.y - 10, "#f3e9b5"); }
+  let r;
+  try {
+    if (useMock()) r = mockGodResponse(world, target, ch);
+    else {
+      await ensureModel();
+      const p = buildGodPrompt(world, target, ch, msg);
+      r = await generateJson(p.system, p.user, p.schema, 320);
+      if (!r) throw new Error("no readable answer");
+    }
+  } catch (e) { $("godResult").innerHTML = `<div class="warnbox" style="margin-top:8px">They could not be reached: ${esc(e.message || e)}. No power was spent.</div>`; updateGodButton(); return; }
+  const act = applyGodAct(world, target, ch, msg, r);
+  if (agent && r.believes_a_god_spoke) pop.ring(agent.x, agent.y, "#fff8c8");
+  const idea = act.ideaId ? world.ideas.find((i) => i.id === act.ideaId) : null;
+  $("godResult").innerHTML = `<div class="card" style="margin-top:8px">
+    <div class="quote">"${esc(r.reply)}"</div>
+    <div style="font-size:13px">${esc(r.reaction)}</div>
+    <div style="font-size:13px;margin-top:4px"><b>They think it was:</b> ${esc(r.interpretation)}</div>
+    <div style="font-size:13px"><b>Believes a god spoke:</b> ${r.believes_a_god_spoke ? `yes${r.god_name ? `, and calls it <b>${esc(r.god_name)}</b>` : ""}` : "no"} · <b>Will obey:</b> ${esc(r.will_obey)}</div>
+    ${r.will_tell_others && r.message_to_others ? `<div style="font-size:13px"><b>Will tell others:</b> <i>"${esc(r.message_to_others)}"</i></div>` : '<div style="font-size:13px"><b>Will keep it to themselves.</b></div>'}
+    ${idea ? `<div style="font-size:13px;color:#f3e9b5;margin-top:4px">A faith is forming: ${esc(idea.name)}.</div>` : ""}</div>`;
+  $("godMsg").value = "";
+  pop.sync(world); renderAll();
+};
+
+// ---------------------------------------------------------------------------
+// Side panels
+// ---------------------------------------------------------------------------
+function renderPower() {
+  const g = world.god;
+  $("powerBar").style.width = `${(g.power / g.max) * 100}%`;
+  $("powerText").textContent = `${Math.floor(g.power)} / ${g.max}`;
+  const faiths = world.ideas.filter((i) => i.creditsGod);
+  $("believersText").textContent = `${g.believers} people credit you for your acts. Power refills each year by ${(2 + g.believers / 25).toFixed(1)}.${faiths.length ? ` Faiths in your name: ${faiths.map((f) => f.name).join(", ")}.` : ""}`;
+  updateGodButton();
+}
+function renderRealm() {
+  const w = world, pct = (x) => `${Math.round(x * 100)}%`;
+  $("yearLabel").textContent = `Year ${w.year}`;
+  const rows = [["Government", w.government.name], ["Trust in rulers", pct(w.legitimacy)], ["Grain tax", `${Math.round(w.tax * 100)} in 100`], ["Granary", `${Math.round(w.granary)} sacks`],
+    ["Soldiers", `${w.soldiers} (loyalty ${pct(w.loyalty)})`], ["Varn's dam", w.dam > 0.7 ? "nearly closed" : w.dam > 0.35 ? "half closed" : "mostly open"],
+    ...Object.entries(w.villages).map(([n, v]) => [n, `${v.pop} people · ${v.water === "spring" ? "spring" : v.wells ? "wells" : "river water"} · ${v.feverDeaths} fever deaths`])];
+  $("realm").innerHTML = rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("");
+}
+function renderMindsList() {
+  $("mindsList").innerHTML = liveMinds(world).map((m) => `<button class="secondary" data-id="${m.id}">${esc(m.name)}</button>`).join("");
+  $("mindsList").querySelectorAll("button").forEach((b) => (b.onclick = () => { const m = world.minds.find((x) => x.id === +b.dataset.id); select("mind", m); const a = pop.agents.get("m" + m.id); if (a) pop.ring(a.x, a.y, "#ffffff"); }));
+}
+const MAJOR = new Set(["revolution", "revolt", "war", "idea", "rise", "death", "succession", "summary", "setting", "god", "diplomacy"]);
+function renderFeed() {
+  const el = $("feed"); const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  let html = "", y = null;
+  for (const e of world.chronicle.filter((e) => MAJOR.has(e.kind) || e.speech).slice(-120)) {
+    if (e.year !== y) { y = e.year; html += `<div class="yr">Year ${y}</div>`; }
+    html += `<div class="ev ${e.kind}">${esc(e.text)}${e.speech ? `<span class="sp">"${esc(e.speech)}"</span>` : ""}</div>`;
+  }
+  el.innerHTML = html; if (stick) el.scrollTop = el.scrollHeight;
+}
+function renderSide() { renderFeed(); renderPower(); }
+function renderAll() { renderRealm(); renderPower(); renderMindsList(); renderFeed(); if (selected) { renderSelected(); renderGodTarget(); } }
+renderAll();
+
+$("copyChron").onclick = async () => {
+  let out = `THE VALLEY OF OREN – map run (seed ${world.seed})\n`; let y = null;
+  for (const e of world.chronicle) { if (e.year !== y) { y = e.year; out += `\n== Year ${y} ==\n`; } out += `- ${e.text}${e.speech ? ` "${e.speech}"` : ""}\n`; }
+  out += `\nGOD: power ${Math.floor(world.god.power)}, believers ${world.god.believers}\n${world.god.acts.map((a) => `- ${a.year} ${a.channel} to ${a.target}: "${a.message}" → ${a.response.reaction} | believes: ${a.response.believes_a_god_spoke} | ${a.response.god_name}`).join("\n")}`;
+  out += `\nIDEAS:\n${world.ideas.map((i) => `- ${i.name} (${i.kind}${i.creditsGod ? ", credits the god" : ""}): "${i.tenet}"`).join("\n")}`;
+  try { await navigator.clipboard.writeText(out); $("copyMsg").textContent = "Copied."; } catch { $("copyMsg").textContent = "Copy failed."; }
+  setTimeout(() => ($("copyMsg").textContent = ""), 3000);
+};
+
+if (location.protocol === "file:") log("Opened from disk: host this page so modules and the model can load.");
+log("The valley is ready. Watch it, press Start history, or speak to someone.");
+</script>
+</body>
+</html>
